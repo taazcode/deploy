@@ -1,3 +1,5 @@
+
+
 /* ============================================================
    StoreBill — app.js
    Vanilla JS, no frameworks. Requires style.css + index.html
@@ -6,19 +8,19 @@
 "use strict";
 
 // ── CONFIG ────────────────────────────────────────────────────────────────
-const SUPABASE_URL  = "https://lphokjzfjhejeltkcdqp.supabase.co";
-const SUPABASE_KEY  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxwaG9ranpmamhlamVsdGtjZHFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MDM0MzUsImV4cCI6MjA4OTM3OTQzNX0.s9CppC6i1YniKEBtLPbkIA-hbojRH18VwGD4qIhCLF4";
+// Replace the process.env lines with your actual keys
+const SUPABASE_URL  = "https://wkbvamcmusaolmxdurhk.supabase.co"; // Your Supabase URL
+const SUPABASE_KEY  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndrYnZhbWNtdXNhb2xteGR1cmhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4NTE3ODksImV4cCI6MjA4OTQyNzc4OX0.dp3WHwlUhLCKbNDf0zELzM3ocFrWvzGJiaIYVhR14xo"; // Use the full key from your .env
 const ADMIN_PASSWORD = "admin123";
-
 // ── SUPABASE API ──────────────────────────────────────────────────────────
 async function sbFetch(path, options = {}) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     headers: {
-      "apikey": SUPABASE_KEY,
-      "Authorization": `Bearer ${SUPABASE_KEY}`,
-      "Content-Type": "application/json",
-      "Prefer": options.prefer || "return=representation",
-      ...(options.extraHeaders || {})
+     "apikey": SUPABASE_KEY,
+     "Authorization": `Bearer ${SUPABASE_KEY}`,
+     "Content-Type": "application/json",
+     ...(options.prefer ? { "Prefer": options.prefer } : {}), // Only send Prefer if needed
+     ...(options.extraHeaders || {})
     },
     method:  options.method || "GET",
     body:    options.body   || undefined
