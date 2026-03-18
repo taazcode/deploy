@@ -79,6 +79,13 @@ const AppState = {
                 this.monthlyRevenue = { month: monthlyRes.data.month, total: parseFloat(monthlyRes.data.total) };
             }
 
+            // 3. Refresh UI after data arrives
+            UI.updateItemList();
+            UI.renderRecentBills();
+            UI.renderDues();
+            UI.renderStaffPayments();
+            UI.populateItemSearch();
+
         } catch (e) {
             console.error('Error loading data from Supabase:', e);
             UI.showToast('Failed to load data from database.', 'error');
@@ -306,7 +313,8 @@ const UI = {
         // User (Billing)
         customerName: document.getElementById('customerName'),
         billDate: document.getElementById('billDate'),
-        itemSelect: document.getElementById('itemSelect'),
+        itemInput: document.getElementById('itemInput'),
+        itemList: document.getElementById('itemList'),
         itemQty: document.getElementById('itemQty'),
         itemWeight: document.getElementById('itemWeight'),
         addItemBtn: document.getElementById('addItemBtn'),
@@ -328,7 +336,7 @@ const UI = {
     init() {
         this.bindEvents();
         this.populateItemSearch();
-        this.updateItemSelect();
+        this.updateItemList();
         this.renderCurrentBill();
         this.renderRecentBills();
         this.renderStaffPayments();
@@ -405,6 +413,7 @@ const UI = {
         });
 
         // Billing
+        this.elements.itemInput.addEventListener('input', () => this.handleItemSearchInput());
         this.elements.addItemBtn.addEventListener('click', () => this.handleAddToBill());
         this.elements.clearBillBtn.addEventListener('click', () => {
             if (AppState.currentBill.length > 0 && confirm("Clear current bill?")) {
@@ -433,7 +442,7 @@ const UI = {
             this.elements.adminPanel.classList.remove('active');
             
             // Refresh select when switching to user panel
-            this.updateItemSelect();
+            this.updateItemList();
         } else {
             this.elements.navAdmin.classList.add('active');
             this.elements.navUser.classList.remove('active');
@@ -497,7 +506,7 @@ const UI = {
     // --- Admin Views ---
     currentEditItemId: null,
 
-    handleAdminItemSubmit() {
+    async handleAdminItemSubmit() {
         const name = this.elements.adminItemName.value.trim();
         const price = this.elements.adminItemPrice.value;
         const type = this.elements.adminItemType.value;
@@ -508,16 +517,16 @@ const UI = {
         }
 
         if (this.currentEditItemId) {
-            AppState.updateItem(this.currentEditItemId, name, price, type);
+            await AppState.updateItem(this.currentEditItemId, name, price, type);
             this.showToast('Item successfully updated.');
         } else {
-            AppState.addItem(name, price, type);
+            await AppState.addItem(name, price, type);
             this.showToast('New item added gracefully.');
         }
         
         this.resetAdminForm();
         this.populateItemSearch();
-        this.updateItemSelect();
+        this.updateItemList();
     },
 
     resetAdminForm() {
@@ -567,12 +576,12 @@ const UI = {
         });
     },
 
-    deleteAdminItem(id) {
+    async deleteAdminItem(id) {
         if(confirm('Are you sure you want to remove this item?')) {
-            AppState.deleteItem(id);
+            await AppState.deleteItem(id);
             if (this.currentEditItemId === id) this.resetAdminForm();
             this.populateItemSearch();
-            this.updateItemSelect();
+            this.updateItemList();
             this.showToast('Item deleted.', 'success');
         }
     },
@@ -580,7 +589,7 @@ const UI = {
     // --- Dues & Payables ---
     currentEditDueId: null,
 
-    handleDueSubmit() {
+    async handleDueSubmit() {
         const name = this.elements.dueName.value.trim();
         const type = this.elements.dueType.value;
         const amount = this.elements.dueAmount.value;
@@ -589,10 +598,10 @@ const UI = {
         if (!name || !amount) return;
 
         if (this.currentEditDueId) {
-            AppState.updateDue(this.currentEditDueId, name, amount, date, type);
+            await AppState.updateDue(this.currentEditDueId, name, amount, date, type);
             this.showToast('Ledger entry updated.', 'success');
         } else {
-            AppState.addDue(name, amount, date, type);
+            await AppState.addDue(name, amount, date, type);
             this.showToast('Entry saved to ledger.', 'success');
         }
         
@@ -667,9 +676,9 @@ const UI = {
         });
     },
 
-    settleDue(id) {
+    async settleDue(id) {
         if(confirm('Mark this entry as settled/paid?')) {
-            AppState.settleDue(id);
+            await AppState.settleDue(id);
             this.renderDues();
             this.showToast('Entry marked as settled.', 'success');
         }
@@ -678,7 +687,7 @@ const UI = {
     // --- Staff Management ---
     currentEditStaffId: null,
 
-    handleStaffSubmit() {
+    async handleStaffSubmit() {
         const name = this.elements.staffName.value.trim();
         const type = this.elements.staffPaymentType.value;
         const amount = this.elements.staffAmount.value;
@@ -687,10 +696,10 @@ const UI = {
         if (!name || !amount) return;
 
         if (this.currentEditStaffId) {
-            AppState.updateStaffPayment(this.currentEditStaffId, name, type, amount, date);
+            await AppState.updateStaffPayment(this.currentEditStaffId, name, type, amount, date);
             this.showToast('Staff payment updated.', 'success');
         } else {
-            AppState.addStaffPayment(name, type, amount, date);
+            await AppState.addStaffPayment(name, type, amount, date);
             this.showToast('Payment saved to Staff Ledger.', 'success');
         }
         
@@ -728,9 +737,9 @@ const UI = {
         this.elements.staffName.focus();
     },
 
-    deleteStaffPayment(id) {
+    async deleteStaffPayment(id) {
         if(confirm('Are you sure you want to delete this payment record?')) {
-            AppState.deleteStaffPayment(id);
+            await AppState.deleteStaffPayment(id);
             if (this.currentEditStaffId === id) this.resetStaffForm();
             this.renderStaffPayments();
             this.showToast('Payment record deleted.', 'success');
@@ -773,56 +782,62 @@ const UI = {
     },
 
     // --- User (Billing) Views ---
-    updateItemSelect() {
-        const select = this.elements.itemSelect;
-        select.innerHTML = '<option value="" disabled selected>Select an item...</option>';
+    updateItemList() {
+        const datalist = this.elements.itemList;
+        datalist.innerHTML = '';
         
         const sortedItems = [...AppState.items].sort((a, b) => a.name.localeCompare(b.name));
         
         sortedItems.forEach(item => {
             const opt = document.createElement('option');
-            opt.value = item.id;
+            opt.value = item.name;
             const typeLabel = item.type === 'weight' ? '/kg' : '/unit';
-            opt.textContent = `${item.name} - ${this.formatCurrency(item.price)} ${typeLabel}`;
-            select.appendChild(opt);
-        });
-        
-        // Listen for change to update qty/weight inputs
-        select.addEventListener('change', () => {
-            const selectedItem = AppState.items.find(i => i.id === select.value);
-            if (selectedItem) {
-                if (selectedItem.type === 'weight') {
-                    this.elements.itemQty.disabled = true;
-                    this.elements.itemWeight.disabled = false;
-                    this.elements.itemWeight.focus();
-                } else {
-                    this.elements.itemQty.disabled = false;
-                    this.elements.itemQty.value = 1;
-                    this.elements.itemWeight.disabled = true;
-                    this.elements.itemQty.focus();
-                }
-            }
+            // We can add the price in the option text for user visibility
+            opt.textContent = `${this.formatCurrency(item.price)} ${typeLabel}`;
+            datalist.appendChild(opt);
         });
     },
 
+    handleItemSearchInput() {
+        const val = this.elements.itemInput.value;
+        const item = AppState.items.find(i => i.name === val);
+        
+        if (item) {
+            // Valid item selected from list
+            if (item.type === 'weight') {
+                this.elements.itemQty.disabled = true;
+                this.elements.itemWeight.disabled = false;
+                this.elements.itemWeight.focus();
+                this.elements.itemWeight.select();
+            } else {
+                this.elements.itemQty.disabled = false;
+                this.elements.itemWeight.disabled = true;
+                this.elements.itemQty.focus();
+                this.elements.itemQty.select();
+            }
+        }
+    },
+
     handleAddToBill() {
-        const itemId = this.elements.itemSelect.value;
+        const itemName = this.elements.itemInput.value;
+        const item = AppState.items.find(i => i.name === itemName);
         const qty = this.elements.itemQty.value;
         const weight = this.elements.itemWeight.value;
 
-        if (!itemId) {
-            this.showToast('Please select an item first.', 'warning');
+        if (!item) {
+            this.showToast('Please select a valid item from the list.', 'warning');
             return;
         }
 
-        if (AppState.addToCurrentBill(itemId, qty, weight)) {
+        if (AppState.addToCurrentBill(item.id, qty, weight)) {
             this.renderCurrentBill();
-            // Reset selection to make multiple additions easier
-            this.elements.itemSelect.value = '';
+            // Reset selection
+            this.elements.itemInput.value = '';
             this.elements.itemQty.value = '1';
             this.elements.itemQty.disabled = false;
             this.elements.itemWeight.value = '1';
             this.elements.itemWeight.disabled = true;
+            this.elements.itemInput.focus();
         } else {
             this.showToast('Invalid quantity or weight.', 'error');
         }
@@ -917,24 +932,22 @@ const UI = {
         this.renderCurrentBill();
     },
 
-    handleSaveBill() {
+    async handleSaveBill() {
         const customerName = this.elements.customerName.value.trim();
         const date = this.elements.billDate.value;
         const discount = parseFloat(this.elements.billDiscount.value) || 0;
         const finalGrandTotal = parseFloat(this.elements.grandTotal.value) || 0;
         const txType = this.elements.transactionType.value;
 
-        if (AppState.saveCurrentBill(customerName, date, discount, finalGrandTotal, txType)) {
+        const saved = await AppState.saveCurrentBill(customerName, date, discount, finalGrandTotal, txType);
+        if (saved) {
             this.showToast('Bill completely saved!', 'success');
-            
-            // Reset User Form
             AppState.clearCurrentBill();
             this.elements.billDiscount.value = 0;
             this.elements.transactionType.value = 'Cash';
             this.renderCurrentBill();
             this.renderRecentBills();
             this.elements.customerName.value = '';
-            // keep the date as it was
         }
     },
 
@@ -1237,6 +1250,12 @@ function generateMonthlyReport() {
 
 // Bootstrap Application
 document.addEventListener('DOMContentLoaded', () => {
-    AppState.init();
+    // 1. Initialize UI Elements and Event Listeners Immediately
     UI.init();
+    
+    // 2. Start Data Loading in Background (don't block the UI)
+    AppState.init().catch(err => {
+        console.error('Critical initialization error:', err);
+        UI.showToast('Bootstrap error. Check internet connection.', 'error');
+    });
 });
