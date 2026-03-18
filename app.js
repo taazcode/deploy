@@ -5,7 +5,7 @@
 
 // --- SUPABASE CLIENT ---
 const SUPABASE_URL = 'https://lphokjzfjhejeltkcdqp.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_EKAZajhaXEoTJ-lSImEF0Q_T3YdLYcl';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxwaG9ranpmamhlamVsdGtjZHFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MDM0MzUsImV4cCI6MjA4OTM3OTQzNX0.s9CppC6i1YniKEBtLPbkIA-hbojRH18VwGD4qIhCLF4';
 
 // Lazy-init helper to prevent crash if library loads slowly
 let supabase;
@@ -277,11 +277,11 @@ const UI = {
             generatePdfBtn: document.getElementById('generatePdfBtn'),
             generateWeeklyBtn: document.getElementById('generateWeeklyBtn'),
             generateMonthlyBtn: document.getElementById('generateMonthlyBtn'),
-            
+
             // Panels
             userPanel: document.getElementById('userPanel'),
             adminPanel: document.getElementById('adminPanel'),
-            
+
             // Admin
             adminPasswordScreen: document.getElementById('adminPasswordScreen'),
             adminContentWrapper: document.getElementById('adminContentWrapper'),
@@ -315,7 +315,7 @@ const UI = {
             adminStaffBody: document.getElementById('adminStaffBody'),
 
             clearDataBtn: document.getElementById('clearDataBtn'),
-            
+
             // User (Billing)
             customerName: document.getElementById('customerName'),
             billDate: document.getElementById('billDate'),
@@ -346,7 +346,7 @@ const UI = {
         this.renderCurrentBill();
         this.renderRecentBills();
         this.renderStaffPayments();
-        
+
         // Setup Date inputs
         const today = new Date().toISOString().split('T')[0];
         if (this.elements.dueDate) this.elements.dueDate.value = today;
@@ -358,7 +358,7 @@ const UI = {
         // Navigation
         this.elements.navUser.addEventListener('click', () => this.switchTab('user'));
         this.elements.navAdmin.addEventListener('click', () => this.switchTab('admin'));
-        
+
         // Admin Password
         this.elements.adminLoginBtn.addEventListener('click', () => this.handleAdminLogin());
         this.elements.adminPasswordInput.addEventListener('keypress', (e) => {
@@ -395,7 +395,7 @@ const UI = {
             e.preventDefault();
             this.handleDueSubmit();
         });
-        
+
         this.elements.cancelDueEditBtn.addEventListener('click', () => {
             this.resetDueForm();
         });
@@ -441,7 +441,7 @@ const UI = {
 
     switchTab(tab) {
         console.log('Switching to tab:', tab);
-        
+
         const navUser = this.elements.navUser;
         const navAdmin = this.elements.navAdmin;
         const userPanel = this.elements.userPanel;
@@ -467,11 +467,11 @@ const UI = {
             adminPanel.classList.add('active');
             userPanel.classList.add('hidden');
             userPanel.classList.remove('active');
-            
-            if(!this.isAdminUnlocked) {
+
+            if (!this.isAdminUnlocked) {
                 this.elements.adminPasswordInput.focus();
             } else {
-                this.renderDues(); 
+                this.renderDues();
             }
         }
     },
@@ -499,7 +499,7 @@ const UI = {
     showToast(message, type = 'success') {
         const toast = document.createElement('div');
         toast.className = `toast ${type}`;
-        
+
         // Set icon based on type
         let icon = '';
         if (type === 'success') {
@@ -539,7 +539,7 @@ const UI = {
             await AppState.addItem(name, price, type);
             this.showToast('New item added gracefully.');
         }
-        
+
         this.resetAdminForm();
         this.populateItemSearch();
         this.updateItemList();
@@ -564,11 +564,11 @@ const UI = {
         this.elements.adminItemName.value = item.name;
         this.elements.adminItemPrice.value = item.price;
         this.elements.adminItemType.value = item.type || 'fixed';
-        
+
         this.elements.adminSaveBtn.textContent = 'Update Item';
         this.elements.adminCancelEditBtn.classList.remove('hidden');
         this.elements.adminDeleteBtn.classList.remove('hidden');
-        
+
         // Scroll to form smoothly if it's out of view
         this.elements.adminItemName.scrollIntoView({ behavior: 'smooth', block: 'center' });
         this.elements.adminItemName.focus();
@@ -577,7 +577,7 @@ const UI = {
     populateItemSearch() {
         const datalist = this.elements.adminItemDataList;
         if (!datalist) return;
-        
+
         datalist.innerHTML = '';
 
         if (AppState.items.length === 0) return;
@@ -593,7 +593,7 @@ const UI = {
     },
 
     async deleteAdminItem(id) {
-        if(confirm('Are you sure you want to remove this item?')) {
+        if (confirm('Are you sure you want to remove this item?')) {
             await AppState.deleteItem(id);
             if (this.currentEditItemId === id) this.resetAdminForm();
             this.populateItemSearch();
@@ -620,7 +620,7 @@ const UI = {
             await AppState.addDue(name, amount, date, type);
             this.showToast('Entry saved to ledger.', 'success');
         }
-        
+
         this.resetDueForm();
         this.renderDues();
     },
@@ -632,7 +632,7 @@ const UI = {
         const today = new Date().toISOString().split('T')[0];
         this.elements.dueDate.value = today;
         this.elements.dueType.value = 'receive';
-        
+
         this.elements.saveDueBtn.textContent = 'Save Entry';
         this.elements.cancelDueEditBtn.classList.add('hidden');
         this.elements.dueName.focus();
@@ -650,13 +650,13 @@ const UI = {
 
         this.elements.saveDueBtn.textContent = 'Update Entry';
         this.elements.cancelDueEditBtn.classList.remove('hidden');
-        
+
         this.elements.dueName.scrollIntoView({ behavior: 'smooth', block: 'center' });
         this.elements.dueName.focus();
     },
 
     renderDues() {
-        if(!this.elements.adminDuesBody) return;
+        if (!this.elements.adminDuesBody) return;
         const tbody = this.elements.adminDuesBody;
         tbody.innerHTML = '';
 
@@ -669,9 +669,9 @@ const UI = {
 
         sortedDues.forEach(due => {
             const tr = document.createElement('tr');
-            
-            const typeLabel = due.type === 'receive' 
-                ? '<span style="color: var(--success); font-weight: 500;">Owed by Customer (+)</span>' 
+
+            const typeLabel = due.type === 'receive'
+                ? '<span style="color: var(--success); font-weight: 500;">Owed by Customer (+)</span>'
                 : '<span style="color: var(--danger); font-weight: 500;">Payable to Vendor (-)</span>';
 
             tr.innerHTML = `
@@ -693,7 +693,7 @@ const UI = {
     },
 
     async settleDue(id) {
-        if(confirm('Mark this entry as settled/paid?')) {
+        if (confirm('Mark this entry as settled/paid?')) {
             await AppState.settleDue(id);
             this.renderDues();
             this.showToast('Entry marked as settled.', 'success');
@@ -718,7 +718,7 @@ const UI = {
             await AppState.addStaffPayment(name, type, amount, date);
             this.showToast('Payment saved to Staff Ledger.', 'success');
         }
-        
+
         this.resetStaffForm();
         this.renderStaffPayments();
     },
@@ -730,7 +730,7 @@ const UI = {
         const today = new Date().toISOString().split('T')[0];
         this.elements.staffDate.value = today;
         this.elements.staffPaymentType.value = 'salary';
-        
+
         this.elements.saveStaffBtn.textContent = 'Save Payment';
         this.elements.cancelStaffEditBtn.classList.add('hidden');
         this.elements.staffName.focus();
@@ -748,13 +748,13 @@ const UI = {
 
         this.elements.saveStaffBtn.textContent = 'Update Payment';
         this.elements.cancelStaffEditBtn.classList.remove('hidden');
-        
+
         this.elements.staffName.scrollIntoView({ behavior: 'smooth', block: 'center' });
         this.elements.staffName.focus();
     },
 
     async deleteStaffPayment(id) {
-        if(confirm('Are you sure you want to delete this payment record?')) {
+        if (confirm('Are you sure you want to delete this payment record?')) {
             await AppState.deleteStaffPayment(id);
             if (this.currentEditStaffId === id) this.resetStaffForm();
             this.renderStaffPayments();
@@ -778,7 +778,7 @@ const UI = {
             const tr = document.createElement('tr');
             const typeLabel = staff.type === 'salary' ? 'Salary' : 'Advance';
             const typeColor = staff.type === 'salary' ? 'var(--success)' : 'var(--warning)';
-            
+
             tr.innerHTML = `
                 <td class="font-medium">${staff.name}</td>
                 <td class="text-center text-sm" style="color: ${typeColor}">${typeLabel}</td>
@@ -801,9 +801,9 @@ const UI = {
     updateItemList() {
         const datalist = this.elements.itemList;
         datalist.innerHTML = '';
-        
+
         const sortedItems = [...AppState.items].sort((a, b) => a.name.localeCompare(b.name));
-        
+
         sortedItems.forEach(item => {
             const opt = document.createElement('option');
             opt.value = item.name;
@@ -817,7 +817,7 @@ const UI = {
     handleItemSearchInput() {
         const val = this.elements.itemInput.value;
         const item = AppState.items.find(i => i.name === val);
-        
+
         if (item) {
             // Valid item selected from list
             if (item.type === 'weight') {
@@ -879,7 +879,7 @@ const UI = {
             // Adding a sligth animation delay for rows
             tr.style.animation = `fadeIn 0.3s ease forwards ${(index * 0.05)}s`;
             tr.style.opacity = '0';
-            
+
             const qtyLabel = bItem.type === 'weight' ? `${bItem.qty} kg` : bItem.qty;
             const priceLabel = bItem.type === 'weight' ? `${this.formatCurrency(bItem.price)}/kg` : this.formatCurrency(bItem.price);
 
@@ -919,7 +919,7 @@ const UI = {
             discount = 0;
             this.elements.billDiscount.value = 0;
         }
-        
+
         const grandTotal = subtotal - (subtotal * (discount / 100));
         this.elements.grandTotal.value = grandTotal.toFixed(2);
     },
@@ -928,7 +928,7 @@ const UI = {
         if (AppState.currentBill.length === 0) return;
         const subtotal = AppState.getCurrentBillTotal();
         let grandTotal = parseFloat(this.elements.grandTotal.value) || 0;
-        
+
         if (grandTotal < 0) {
             grandTotal = 0;
             this.elements.grandTotal.value = 0;
@@ -938,7 +938,7 @@ const UI = {
         if (subtotal > 0) {
             discount = ((subtotal - grandTotal) / subtotal) * 100;
         }
-        
+
         // If discount is very small or negative (sur-charge), formatting to 2 decimal places
         this.elements.billDiscount.value = discount.toFixed(2);
     },
@@ -972,7 +972,7 @@ const UI = {
         const totalElem = this.elements.dailyRevenueTotal;
         const monthlyTotalElem = this.elements.monthlyRevenueTotal;
         container.innerHTML = '';
-        
+
         let dailyRevenue = 0;
 
         if (AppState.dailyBills.length === 0) {
@@ -1022,12 +1022,12 @@ function generateEODReport() {
     try {
         const doc = new jsPDF();
         const dateStr = new Date().toLocaleDateString();
-        
+
         // Header
         doc.setFontSize(22);
         doc.setTextColor(30, 41, 59); // Slate 800
         doc.text("Mira Basanloy-Bills", 14, 20);
-        
+
         doc.setFontSize(11);
         doc.setTextColor(100, 116, 139); // Slate 500
         doc.text(`Generated on: ${dateStr}`, 14, 28);
@@ -1039,7 +1039,7 @@ function generateEODReport() {
         // Loop over each bill to draw tables
         AppState.dailyBills.forEach((bill, bIndex) => {
             totalRevenue += bill.grandTotal;
-            
+
             // Check if we need a new page before drawing a section
             if (startY > 250) {
                 doc.addPage();
@@ -1050,7 +1050,7 @@ function generateEODReport() {
             doc.setFontSize(12);
             doc.setTextColor(15, 23, 42);
             doc.text(`Bill #${bIndex + 1} | Customer: ${bill.customerName} | Tx: ${bill.transactionType || 'Cash'} | Date: ${bill.date}`, 14, startY);
-            
+
             startY += 5;
 
             // Prepare table data for the bill items
@@ -1060,17 +1060,17 @@ function generateEODReport() {
                 const qtyLabel = item.type === 'weight' ? `${item.qty} kg` : item.qty.toString();
 
                 return [
-                    item.name, 
-                    priceLabel, 
-                    qtyLabel, 
+                    item.name,
+                    priceLabel,
+                    qtyLabel,
                     `Rs. ${item.total.toFixed(2)}`
                 ]
             });
-            
+
             // Add grand total row for this specific bill
             if (bill.discountAmount > 0.01 || bill.discountAmount < -0.01) {
                 body.push([
-                    { content: 'Subtotal', colSpan: 3, styles: { halign: 'right' } }, 
+                    { content: 'Subtotal', colSpan: 3, styles: { halign: 'right' } },
                     { content: `Rs. ${bill.subtotal.toFixed(2)}` }
                 ]);
                 const titleStr = bill.discountAmount > 0 ? `Discount (${bill.discountPercent}%)` : `Surcharge`;
@@ -1078,13 +1078,13 @@ function generateEODReport() {
                 const highlightColor = bill.discountAmount > 0 ? [220, 38, 38] : [59, 130, 246];
 
                 body.push([
-                    { content: titleStr, colSpan: 3, styles: { halign: 'right', textColor: highlightColor } }, 
+                    { content: titleStr, colSpan: 3, styles: { halign: 'right', textColor: highlightColor } },
                     { content: valStr, styles: { textColor: highlightColor } }
                 ]);
             }
 
             body.push([
-                { content: 'Grand Total', colSpan: 3, styles: { halign: 'right', fontStyle: 'bold' } }, 
+                { content: 'Grand Total', colSpan: 3, styles: { halign: 'right', fontStyle: 'bold' } },
                 { content: `Rs. ${bill.grandTotal.toFixed(2)}`, styles: { fontStyle: 'bold' } }
             ]);
 
@@ -1112,11 +1112,11 @@ function generateEODReport() {
         // Draw Summary Box
         doc.setFillColor(241, 245, 249); // slate 100
         doc.roundedRect(14, startY, 182, 30, 3, 3, 'F');
-        
+
         doc.setFontSize(16);
         doc.setTextColor(15, 23, 42); // slate 900
         doc.text("End of Day Summary", 20, startY + 12);
-        
+
         doc.setFontSize(12);
         doc.text(`Daily Revenue (Grand Total): Rs. ${totalRevenue.toFixed(2)}`, 20, startY + 22);
 
@@ -1185,7 +1185,7 @@ function generateGroupedReport({ title, filename, bills }) {
             startY += 4;
 
             const body = dayBills.map((bill, i) => [
-                `#${i+1} ${bill.customerName}`,
+                `#${i + 1} ${bill.customerName}`,
                 bill.transactionType || 'Cash',
                 `Rs. ${bill.grandTotal.toFixed(2)}`
             ]);
@@ -1270,7 +1270,7 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('DOM Content Loaded. Initializing UI...');
         // 1. Initialize UI Elements and Event Listeners Immediately
         UI.init();
-        
+
         // 2. Start Data Loading in Background (don't block the UI)
         if (getSupabase()) {
             AppState.init().catch(err => {
