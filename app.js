@@ -1,1287 +1,890 @@
-/**
- * BillingPro - Application Logic
- * Backend: Supabase
- */
+/* ============================================================
+   StoreBill — app.js
+   Vanilla JS, no frameworks. Requires style.css + index.html
+   ============================================================ */
 
-// --- SUPABASE CLIENT ---
-const SUPABASE_URL = 'https://lphokjzfjhejeltkcdqp.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxwaG9ranpmamhlamVsdGtjZHFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MDM0MzUsImV4cCI6MjA4OTM3OTQzNX0.s9CppC6i1YniKEBtLPbkIA-hbojRH18VwGD4qIhCLF4';
+"use strict";
 
-// Lazy-init helper to prevent crash if library loads slowly
-let supabase;
-function getSupabase() {
-    if (!supabase) {
-        if (!window.supabase) {
-            console.error('Supabase library not found! Check your internet connection.');
-            return null;
-        }
-        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    }
-    return supabase;
+// ── CONFIG ────────────────────────────────────────────────────────────────
+const SUPABASE_URL  = "https://lphokjzfjhejeltkcdqp.supabase.co";
+const SUPABASE_KEY  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxwaG9ranpmamhlamVsdGtjZHFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MDM0MzUsImV4cCI6MjA4OTM3OTQzNX0.s9CppC6i1YniKEBtLPbkIA-hbojRH18VwGD4qIhCLF4";
+const ADMIN_PASSWORD = "admin123";
+
+// ── SUPABASE API ──────────────────────────────────────────────────────────
+async function sbFetch(path, options = {}) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": `Bearer ${SUPABASE_KEY}`,
+      "Content-Type": "application/json",
+      "Prefer": options.prefer || "return=representation",
+      ...(options.extraHeaders || {})
+    },
+    method:  options.method || "GET",
+    body:    options.body   || undefined
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || err.hint || `HTTP ${res.status}`);
+  }
+  const text = await res.text();
+  return text ? JSON.parse(text) : [];
 }
 
-// --- STATE MANAGEMENT ---
-const AppState = {
-    items: [],       // [{ id, name, price, type }]
-    currentBill: [], // [{ id, itemId, name, price, type, qty, total }]
-    dailyBills: [],  // Today's bills, filtered from allBills on load
-    dues: [],        // [{ id, name, amount, date, type }]
-    monthlyRevenue: { month: new Date().toISOString().slice(0, 7), total: 0 },
-    staffPayments: [],// [{ id, name, type, amount, date }]
-    allBills: [],    // All bills ever, from Supabase 'bills' table
+const api = {
+  getItems:       ()        => sbFetch("items?order=name.asc"),
+  addItem:        (d)       => sbFetch("items",                { method: "POST",  body: JSON.stringify(d) }),
+  updateItem:     (id, d)   => sbFetch(`items?id=eq.${id}`,    { method: "PATCH", body: JSON.stringify(d) }),
+  deleteItem:     (id)      => sbFetch(`items?id=eq.${id}`,    { method: "DELETE",prefer: "return=minimal", extraHeaders: { Prefer: "return=minimal" } }),
 
-    async init() {
-        await this.loadData();
-        const dateInput = document.getElementById('billDate');
-        if (dateInput) {
-            const today = new Date().toISOString().split('T')[0];
-            dateInput.value = today;
-        }
-    },
+  getTransactions: ()       => sbFetch("transactions?order=created_at.desc&limit=500"),
+  addTransaction:  (d)      => sbFetch("transactions",         { method: "POST",  body: JSON.stringify(d) }),
 
-    async loadData() {
-        try {
-            // Fetch all tables in parallel
-            const [
-                itemsRes,
-                billsRes,
-                duesRes,
-                staffRes,
-                monthlyRes
-            ] = await Promise.all([
-                getSupabase().from('items').select('*'),
-                getSupabase().from('bills').select('*').order('created_at', { ascending: false }),
-                getSupabase().from('dues').select('*'),
-                getSupabase().from('staff_payments').select('*'),
-                getSupabase().from('monthly_revenue').select('*').eq('month', new Date().toISOString().slice(0, 7)).maybeSingle()
-            ]);
+  getDues:        ()        => sbFetch("dues?order=created_at.desc"),
+  addDue:         (d)       => sbFetch("dues",                 { method: "POST",  body: JSON.stringify(d) }),
+  updateDue:      (id, d)   => sbFetch(`dues?id=eq.${id}`,     { method: "PATCH", body: JSON.stringify(d), extraHeaders: { Prefer: "return=representation" } }),
+  deleteDue:      (id)      => sbFetch(`dues?id=eq.${id}`,     { method: "DELETE",extraHeaders: { Prefer: "return=minimal" } }),
 
-            if (itemsRes.error) throw itemsRes.error;
-            if (billsRes.error) throw billsRes.error;
-            if (duesRes.error) throw duesRes.error;
-            if (staffRes.error) throw staffRes.error;
-
-            // Map items (snake_case → camelCase)
-            this.items = (itemsRes.data || []).map(i => ({
-                id: i.id, name: i.name, price: parseFloat(i.price), type: i.type
-            }));
-
-            // Map bills
-            this.allBills = (billsRes.data || []).map(b => this._mapBillFromDB(b));
-
-            // Derive today's bills
-            const today = new Date().toISOString().split('T')[0];
-            this.dailyBills = this.allBills.filter(b => b.date === today);
-
-            // Map dues
-            this.dues = (duesRes.data || []).map(d => ({
-                id: d.id, name: d.name,
-                amount: parseFloat(d.amount),
-                date: d.date, type: d.type
-            }));
-
-            // Map staff
-            this.staffPayments = (staffRes.data || []).map(s => ({
-                id: s.id, name: s.name, type: s.type,
-                amount: parseFloat(s.amount), date: s.date
-            }));
-
-            // Monthly revenue
-            if (monthlyRes.data) {
-                this.monthlyRevenue = { month: monthlyRes.data.month, total: parseFloat(monthlyRes.data.total) };
-            }
-
-            // 3. Refresh UI after data arrives
-            UI.updateItemList();
-            UI.renderRecentBills();
-            UI.renderDues();
-            UI.renderStaffPayments();
-            UI.populateItemSearch();
-
-        } catch (e) {
-            console.error('Error loading data from Supabase:', e);
-            UI.showToast('Failed to load data from database.', 'error');
-        }
-    },
-
-    _mapBillFromDB(b) {
-        return {
-            id: b.id,
-            customerName: b.customer_name,
-            date: b.date,
-            items: b.items || [],
-            subtotal: parseFloat(b.subtotal),
-            discountPercent: parseFloat(b.discount_percent),
-            discountAmount: parseFloat(b.discount_amount),
-            grandTotal: parseFloat(b.grand_total),
-            transactionType: b.transaction_type
-        };
-    },
-
-    // --- Items ---
-    async updateItem(id, name, price, type) {
-        const { error } = await getSupabase().from('items').update({ name, price: parseFloat(price), type }).eq('id', id);
-        if (error) { UI.showToast('Error updating item.', 'error'); throw error; }
-        await this.loadData();
-    },
-
-    async addItem(name, price, type) {
-        const newItem = { name, price: parseFloat(price), type: type || 'fixed' };
-        const { error } = await getSupabase().from('items').insert([newItem]);
-        if (error) { UI.showToast('Error saving item.', 'error'); throw error; }
-        await this.loadData();
-        return newItem;
-    },
-
-    async deleteItem(itemId) {
-        const { error } = await getSupabase().from('items').delete().eq('id', itemId);
-        if (error) { UI.showToast('Error deleting item.', 'error'); throw error; }
-        await this.loadData();
-    },
-
-    // --- Bill (current in-progress) ---
-    addToCurrentBill(itemId, qty, weight) {
-        const item = this.items.find(i => i.id === itemId);
-        if (!item) return false;
-        const isWeight = item.type === 'weight';
-        const finalValue = isWeight ? parseFloat(weight) : parseInt(qty);
-        if (isNaN(finalValue) || finalValue <= 0) return false;
-
-        const existingIdx = this.currentBill.findIndex(b => b.itemId === itemId);
-        if (existingIdx >= 0) {
-            this.currentBill[existingIdx].qty += finalValue;
-            this.currentBill[existingIdx].total = this.currentBill[existingIdx].qty * item.price;
-        } else {
-            this.currentBill.push({
-                id: 'b_item_' + Date.now(),
-                itemId: item.id, name: item.name,
-                price: item.price, type: item.type,
-                qty: finalValue, total: item.price * finalValue
-            });
-        }
-        return true;
-    },
-
-    removeFromCurrentBill(billItemId) {
-        this.currentBill = this.currentBill.filter(b => b.id !== billItemId);
-    },
-
-    clearCurrentBill() { this.currentBill = []; },
-
-    getCurrentBillTotal() {
-        return this.currentBill.reduce((sum, item) => sum + item.total, 0);
-    },
-
-    async saveCurrentBill(customerName, date, discountPercent, finalGrandTotal, txType) {
-        if (this.currentBill.length === 0) return false;
-        const subtotal = this.getCurrentBillTotal();
-        const discountAmount = subtotal - finalGrandTotal;
-
-        const bill = {
-            id: 'bill_' + Date.now(),
-            customerName: customerName || 'Walk-in Customer',
-            date, items: [...this.currentBill],
-            subtotal, discountPercent: discountPercent || 0,
-            discountAmount, grandTotal: finalGrandTotal,
-            transactionType: txType || 'Cash'
-        };
-
-        const dbBill = {
-            id: bill.id,
-            customer_name: bill.customerName,
-            date: bill.date,
-            items: bill.items,
-            subtotal: bill.subtotal,
-            discount_percent: bill.discountPercent,
-            discount_amount: bill.discountAmount,
-            grand_total: bill.grandTotal,
-            transaction_type: bill.transactionType
-        };
-
-        const { error } = await getSupabase().from('bills').insert([dbBill]);
-        if (error) { UI.showToast('Error saving bill.', 'error'); return false; }
-
-        this.dailyBills.push(bill);
-        this.allBills.unshift(bill);
-
-        await this.addToMonthlyRevenue(finalGrandTotal);
-        return true;
-    },
-
-    clearAllDailyData() {
-        // Only clears local display — bills persist in Supabase for reports
-        this.dailyBills = [];
-    },
-
-    // --- Monthly Revenue ---
-    async addToMonthlyRevenue(amount) {
-        this.monthlyRevenue.total += amount;
-        const { error } = await getSupabase().from('monthly_revenue').upsert({
-            month: this.monthlyRevenue.month,
-            total: this.monthlyRevenue.total
-        }, { onConflict: 'month' });
-        if (error) console.error('Monthly revenue upsert error:', error);
-    },
-
-    // --- Dues ---
-    async addDue(name, amount, date, type) {
-        const newDue = { name, amount: parseFloat(amount), date, type };
-        const { error } = await getSupabase().from('dues').insert([newDue]);
-        if (error) { UI.showToast('Error saving due.', 'error'); throw error; }
-        await this.loadData();
-    },
-
-    async updateDue(id, name, amount, date, type) {
-        const { error } = await getSupabase().from('dues').update({ name, amount: parseFloat(amount), date, type }).eq('id', id);
-        if (error) { UI.showToast('Error updating due.', 'error'); throw error; }
-        await this.loadData();
-    },
-
-    async settleDue(dueId) {
-        const { error } = await getSupabase().from('dues').delete().eq('id', dueId);
-        if (error) { UI.showToast('Error settling due.', 'error'); throw error; }
-        await this.loadData();
-    },
-
-    // --- Staff Payments ---
-    async addStaffPayment(name, type, amount, date) {
-        const newPayment = { name, type, amount: parseFloat(amount), date };
-        const { error } = await getSupabase().from('staff_payments').insert([newPayment]);
-        if (error) { UI.showToast('Error saving staff payment.', 'error'); throw error; }
-        await this.loadData();
-    },
-
-    async updateStaffPayment(id, name, type, amount, date) {
-        const { error } = await getSupabase().from('staff_payments').update({ name, type, amount: parseFloat(amount), date }).eq('id', id);
-        if (error) { UI.showToast('Error updating staff payment.', 'error'); throw error; }
-        await this.loadData();
-    },
-
-    async deleteStaffPayment(id) {
-        const { error } = await getSupabase().from('staff_payments').delete().eq('id', id);
-        if (error) { UI.showToast('Error deleting staff payment.', 'error'); throw error; }
-        await this.loadData();
-    }
+  getStaff:       ()        => sbFetch("staff?order=created_at.desc"),
+  addStaff:       (d)       => sbFetch("staff",                { method: "POST",  body: JSON.stringify(d) }),
+  updateStaff:    (id, d)   => sbFetch(`staff?id=eq.${id}`,    { method: "PATCH", body: JSON.stringify(d), extraHeaders: { Prefer: "return=representation" } }),
 };
 
-// --- DOM & UI MANAGEMENT ---
-const UI = {
-    elements: {},
-
-    init() {
-        // 1. Map all elements
-        this.elements = {
-            // Nav
-            navUser: document.getElementById('navUser'),
-            navAdmin: document.getElementById('navAdmin'),
-            generatePdfBtn: document.getElementById('generatePdfBtn'),
-            generateWeeklyBtn: document.getElementById('generateWeeklyBtn'),
-            generateMonthlyBtn: document.getElementById('generateMonthlyBtn'),
-
-            // Panels
-            userPanel: document.getElementById('userPanel'),
-            adminPanel: document.getElementById('adminPanel'),
-
-            // Admin
-            adminPasswordScreen: document.getElementById('adminPasswordScreen'),
-            adminContentWrapper: document.getElementById('adminContentWrapper'),
-            adminPasswordInput: document.getElementById('adminPasswordInput'),
-            adminLoginBtn: document.getElementById('adminLoginBtn'),
-            adminItemForm: document.getElementById('adminItemForm'),
-            adminItemName: document.getElementById('adminItemName'),
-            adminItemDataList: document.getElementById('adminItemDataList'),
-            adminItemPrice: document.getElementById('adminItemPrice'),
-            adminItemType: document.getElementById('adminItemType'),
-            adminSaveBtn: document.getElementById('adminSaveBtn'),
-            adminCancelEditBtn: document.getElementById('adminCancelEditBtn'),
-            adminDeleteBtn: document.getElementById('adminDeleteBtn'),
-            adminDueForm: document.getElementById('adminDueForm'),
-            dueName: document.getElementById('dueName'),
-            dueType: document.getElementById('dueType'),
-            dueAmount: document.getElementById('dueAmount'),
-            dueDate: document.getElementById('dueDate'),
-            saveDueBtn: document.getElementById('saveDueBtn'),
-            cancelDueEditBtn: document.getElementById('cancelDueEditBtn'),
-            adminDuesBody: document.getElementById('adminDuesBody'),
-
-            // Staff Panel
-            adminStaffForm: document.getElementById('adminStaffForm'),
-            staffName: document.getElementById('staffName'),
-            staffPaymentType: document.getElementById('staffPaymentType'),
-            staffAmount: document.getElementById('staffAmount'),
-            staffDate: document.getElementById('staffDate'),
-            saveStaffBtn: document.getElementById('saveStaffBtn'),
-            cancelStaffEditBtn: document.getElementById('cancelStaffEditBtn'),
-            adminStaffBody: document.getElementById('adminStaffBody'),
-
-            clearDataBtn: document.getElementById('clearDataBtn'),
-
-            // User (Billing)
-            customerName: document.getElementById('customerName'),
-            billDate: document.getElementById('billDate'),
-            itemInput: document.getElementById('itemInput'),
-            itemList: document.getElementById('itemList'),
-            itemQty: document.getElementById('itemQty'),
-            itemWeight: document.getElementById('itemWeight'),
-            addItemBtn: document.getElementById('addItemBtn'),
-            billItemsBody: document.getElementById('billItemsBody'),
-            subTotal: document.getElementById('subTotal'),
-            billDiscount: document.getElementById('billDiscount'),
-            transactionType: document.getElementById('transactionType'),
-            grandTotal: document.getElementById('grandTotal'),
-            clearBillBtn: document.getElementById('clearBillBtn'),
-            saveBillBtn: document.getElementById('saveBillBtn'),
-            recentBillsList: document.getElementById('recentBillsList'),
-            dailyRevenueTotal: document.getElementById('dailyRevenueTotal'),
-            monthlyRevenueTotal: document.getElementById('monthlyRevenueTotal'),
-
-            // Toasts
-            toastContainer: document.getElementById('toastContainer')
-        };
-
-        // 2. Initialize Logic
-        this.bindEvents();
-        this.populateItemSearch();
-        this.updateItemList();
-        this.renderCurrentBill();
-        this.renderRecentBills();
-        this.renderStaffPayments();
-
-        // Setup Date inputs
-        const today = new Date().toISOString().split('T')[0];
-        if (this.elements.dueDate) this.elements.dueDate.value = today;
-        if (this.elements.staffDate) this.elements.staffDate.value = today;
-        if (this.elements.billDate) this.elements.billDate.value = today;
-    },
-
-    bindEvents() {
-        // Navigation
-        this.elements.navUser.addEventListener('click', () => this.switchTab('user'));
-        this.elements.navAdmin.addEventListener('click', () => this.switchTab('admin'));
-
-        // Admin Password
-        this.elements.adminLoginBtn.addEventListener('click', () => this.handleAdminLogin());
-        this.elements.adminPasswordInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') this.handleAdminLogin();
-        });
-
-        // Admin Form
-        this.elements.adminItemForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            this.handleAdminItemSubmit();
-        });
-
-        // Search Autocomplete Trigger
-        this.elements.adminItemName.addEventListener('input', (e) => {
-            const val = e.target.value.trim().toLowerCase();
-            const matchedItem = AppState.items.find(i => i.name.toLowerCase() === val);
-            if (matchedItem && !this.currentEditItemId) {
-                this.editAdminItem(matchedItem.id);
-            }
-        });
-
-        this.elements.adminCancelEditBtn.addEventListener('click', () => {
-            this.resetAdminForm();
-        });
-
-        this.elements.adminDeleteBtn.addEventListener('click', () => {
-            if (this.currentEditItemId) {
-                this.deleteAdminItem(this.currentEditItemId);
-            }
-        });
-
-        // Dues Management
-        this.elements.adminDueForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            this.handleDueSubmit();
-        });
-
-        this.elements.cancelDueEditBtn.addEventListener('click', () => {
-            this.resetDueForm();
-        });
-
-        // Staff Management
-        this.elements.adminStaffForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            this.handleStaffSubmit();
-        });
-
-        this.elements.cancelStaffEditBtn.addEventListener('click', () => {
-            this.resetStaffForm();
-        });
-
-        // Admin Data Management
-        this.elements.clearDataBtn.addEventListener('click', () => {
-            if (confirm("Are you sure you want to clear all bills and revenue for today? This cannot be undone.")) {
-                AppState.clearAllDailyData();
-                this.renderRecentBills();
-                this.showToast('All daily data cleared.', 'success');
-            }
-        });
-
-        // Billing
-        this.elements.itemInput.addEventListener('input', () => this.handleItemSearchInput());
-        this.elements.addItemBtn.addEventListener('click', () => this.handleAddToBill());
-        this.elements.clearBillBtn.addEventListener('click', () => {
-            if (AppState.currentBill.length > 0 && confirm("Clear current bill?")) {
-                AppState.clearCurrentBill();
-                this.renderCurrentBill();
-            }
-        });
-
-        this.elements.saveBillBtn.addEventListener('click', () => this.handleSaveBill());
-        this.elements.billDiscount.addEventListener('input', () => this.handleDiscountChange());
-        this.elements.grandTotal.addEventListener('input', () => this.handleGrandTotalChange());
-
-        // PDF Generation
-        this.elements.generatePdfBtn.addEventListener('click', () => generateEODReport());
-        this.elements.generateWeeklyBtn.addEventListener('click', () => generateWeeklyReport());
-        this.elements.generateMonthlyBtn.addEventListener('click', () => generateMonthlyReport());
-    },
-
-    switchTab(tab) {
-        console.log('Switching to tab:', tab);
-
-        const navUser = this.elements.navUser;
-        const navAdmin = this.elements.navAdmin;
-        const userPanel = this.elements.userPanel;
-        const adminPanel = this.elements.adminPanel;
-
-        if (!navUser || !navAdmin || !userPanel || !adminPanel) {
-            console.error('Critical UI elements missing for tab switch');
-            return;
-        }
-
-        if (tab === 'user') {
-            navUser.classList.add('active');
-            navAdmin.classList.remove('active');
-            userPanel.classList.remove('hidden');
-            userPanel.classList.add('active');
-            adminPanel.classList.add('hidden');
-            adminPanel.classList.remove('active');
-            this.updateItemList();
-        } else {
-            navAdmin.classList.add('active');
-            navUser.classList.remove('active');
-            adminPanel.classList.remove('hidden');
-            adminPanel.classList.add('active');
-            userPanel.classList.add('hidden');
-            userPanel.classList.remove('active');
-
-            if (!this.isAdminUnlocked) {
-                this.elements.adminPasswordInput.focus();
-            } else {
-                this.renderDues();
-            }
-        }
-    },
-
-    isAdminUnlocked: false,
-
-    handleAdminLogin() {
-        const pwd = this.elements.adminPasswordInput.value;
-        if (pwd === 'admin123') {
-            this.isAdminUnlocked = true;
-            this.elements.adminPasswordScreen.classList.remove('active');
-            this.elements.adminContentWrapper.classList.remove('hidden');
-            this.renderDues();
-            this.showToast('Authentication successful.', 'success');
-        } else {
-            this.elements.adminPasswordInput.value = '';
-            this.showToast('Incorrect password.', 'error');
-        }
-    },
-
-    formatCurrency(amount) {
-        return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(amount);
-    },
-
-    showToast(message, type = 'success') {
-        const toast = document.createElement('div');
-        toast.className = `toast ${type}`;
-
-        // Set icon based on type
-        let icon = '';
-        if (type === 'success') {
-            icon = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>';
-        } else if (type === 'error') {
-            icon = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>';
-        } else {
-            icon = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>';
-        }
-
-        toast.innerHTML = `${icon} <span>${message}</span>`;
-        this.elements.toastContainer.appendChild(toast);
-
-        setTimeout(() => {
-            toast.classList.add('hiding');
-            toast.addEventListener('animationend', () => toast.remove());
-        }, 3000);
-    },
-
-    // --- Admin Views ---
-    currentEditItemId: null,
-
-    async handleAdminItemSubmit() {
-        const name = this.elements.adminItemName.value.trim();
-        const price = this.elements.adminItemPrice.value;
-        const type = this.elements.adminItemType.value;
-
-        if (!name || !price) {
-            this.showToast('Please provide both name and price.', 'error');
-            return;
-        }
-
-        if (this.currentEditItemId) {
-            await AppState.updateItem(this.currentEditItemId, name, price, type);
-            this.showToast('Item successfully updated.');
-        } else {
-            await AppState.addItem(name, price, type);
-            this.showToast('New item added gracefully.');
-        }
-
-        this.resetAdminForm();
-        this.populateItemSearch();
-        this.updateItemList();
-    },
-
-    resetAdminForm() {
-        this.currentEditItemId = null;
-        this.elements.adminItemName.value = '';
-        this.elements.adminItemPrice.value = '';
-        this.elements.adminItemType.value = 'fixed';
-        this.elements.adminSaveBtn.textContent = 'Save Item';
-        this.elements.adminCancelEditBtn.classList.add('hidden');
-        this.elements.adminDeleteBtn.classList.add('hidden');
-        this.elements.adminItemName.focus();
-    },
-
-    editAdminItem(id) {
-        const item = AppState.items.find(i => i.id === id);
-        if (!item) return;
-
-        this.currentEditItemId = item.id;
-        this.elements.adminItemName.value = item.name;
-        this.elements.adminItemPrice.value = item.price;
-        this.elements.adminItemType.value = item.type || 'fixed';
-
-        this.elements.adminSaveBtn.textContent = 'Update Item';
-        this.elements.adminCancelEditBtn.classList.remove('hidden');
-        this.elements.adminDeleteBtn.classList.remove('hidden');
-
-        // Scroll to form smoothly if it's out of view
-        this.elements.adminItemName.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        this.elements.adminItemName.focus();
-    },
-
-    populateItemSearch() {
-        const datalist = this.elements.adminItemDataList;
-        if (!datalist) return;
-
-        datalist.innerHTML = '';
-
-        if (AppState.items.length === 0) return;
-
-        // Sort items alphabetically
-        const sortedItems = [...AppState.items].sort((a, b) => a.name.localeCompare(b.name));
-
-        sortedItems.forEach(item => {
-            const opt = document.createElement('option');
-            opt.value = item.name;
-            datalist.appendChild(opt);
-        });
-    },
-
-    async deleteAdminItem(id) {
-        if (confirm('Are you sure you want to remove this item?')) {
-            await AppState.deleteItem(id);
-            if (this.currentEditItemId === id) this.resetAdminForm();
-            this.populateItemSearch();
-            this.updateItemList();
-            this.showToast('Item deleted.', 'success');
-        }
-    },
-
-    // --- Dues & Payables ---
-    currentEditDueId: null,
-
-    async handleDueSubmit() {
-        const name = this.elements.dueName.value.trim();
-        const type = this.elements.dueType.value;
-        const amount = this.elements.dueAmount.value;
-        const date = this.elements.dueDate.value;
-
-        if (!name || !amount) return;
-
-        if (this.currentEditDueId) {
-            await AppState.updateDue(this.currentEditDueId, name, amount, date, type);
-            this.showToast('Ledger entry updated.', 'success');
-        } else {
-            await AppState.addDue(name, amount, date, type);
-            this.showToast('Entry saved to ledger.', 'success');
-        }
-
-        this.resetDueForm();
-        this.renderDues();
-    },
-
-    resetDueForm() {
-        this.currentEditDueId = null;
-        this.elements.dueName.value = '';
-        this.elements.dueAmount.value = '';
-        const today = new Date().toISOString().split('T')[0];
-        this.elements.dueDate.value = today;
-        this.elements.dueType.value = 'receive';
-
-        this.elements.saveDueBtn.textContent = 'Save Entry';
-        this.elements.cancelDueEditBtn.classList.add('hidden');
-        this.elements.dueName.focus();
-    },
-
-    editDue(id) {
-        const due = AppState.dues.find(d => d.id === id);
-        if (!due) return;
-
-        this.currentEditDueId = due.id;
-        this.elements.dueName.value = due.name;
-        this.elements.dueType.value = due.type;
-        this.elements.dueAmount.value = due.amount;
-        this.elements.dueDate.value = due.date;
-
-        this.elements.saveDueBtn.textContent = 'Update Entry';
-        this.elements.cancelDueEditBtn.classList.remove('hidden');
-
-        this.elements.dueName.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        this.elements.dueName.focus();
-    },
-
-    renderDues() {
-        if (!this.elements.adminDuesBody) return;
-        const tbody = this.elements.adminDuesBody;
-        tbody.innerHTML = '';
-
-        if (AppState.dues.length === 0) {
-            tbody.innerHTML = '<tr class="empty-row"><td colspan="5" class="text-center">No active dues or payables.</td></tr>';
-            return;
-        }
-
-        const sortedDues = [...AppState.dues].sort((a, b) => new Date(b.date) - new Date(a.date));
-
-        sortedDues.forEach(due => {
-            const tr = document.createElement('tr');
-
-            const typeLabel = due.type === 'receive'
-                ? '<span style="color: var(--success); font-weight: 500;">Owed by Customer (+)</span>'
-                : '<span style="color: var(--danger); font-weight: 500;">Payable to Vendor (-)</span>';
-
-            tr.innerHTML = `
-                <td>${due.name}</td>
-                <td class="text-center text-sm">${typeLabel}</td>
-                <td class="text-center text-muted">${due.date}</td>
-                <td class="text-right font-medium">${this.formatCurrency(due.amount)}</td>
-                <td class="text-center" style="white-space: nowrap;">
-                    <button class="icon-btn" onclick="UI.editDue('${due.id}')" title="Edit">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                    </button>
-                    <button class="action-btn" style="padding: 6px 10px; font-size: 12px; margin-left: 4px;" onclick="UI.settleDue('${due.id}')" title="Settle">
-                        Settle
-                    </button>
-                </td>
-            `;
-            tbody.appendChild(tr);
-        });
-    },
-
-    async settleDue(id) {
-        if (confirm('Mark this entry as settled/paid?')) {
-            await AppState.settleDue(id);
-            this.renderDues();
-            this.showToast('Entry marked as settled.', 'success');
-        }
-    },
-
-    // --- Staff Management ---
-    currentEditStaffId: null,
-
-    async handleStaffSubmit() {
-        const name = this.elements.staffName.value.trim();
-        const type = this.elements.staffPaymentType.value;
-        const amount = this.elements.staffAmount.value;
-        const date = this.elements.staffDate.value;
-
-        if (!name || !amount) return;
-
-        if (this.currentEditStaffId) {
-            await AppState.updateStaffPayment(this.currentEditStaffId, name, type, amount, date);
-            this.showToast('Staff payment updated.', 'success');
-        } else {
-            await AppState.addStaffPayment(name, type, amount, date);
-            this.showToast('Payment saved to Staff Ledger.', 'success');
-        }
-
-        this.resetStaffForm();
-        this.renderStaffPayments();
-    },
-
-    resetStaffForm() {
-        this.currentEditStaffId = null;
-        this.elements.staffName.value = '';
-        this.elements.staffAmount.value = '';
-        const today = new Date().toISOString().split('T')[0];
-        this.elements.staffDate.value = today;
-        this.elements.staffPaymentType.value = 'salary';
-
-        this.elements.saveStaffBtn.textContent = 'Save Payment';
-        this.elements.cancelStaffEditBtn.classList.add('hidden');
-        this.elements.staffName.focus();
-    },
-
-    editStaffPayment(id) {
-        const staff = AppState.staffPayments.find(s => s.id === id);
-        if (!staff) return;
-
-        this.currentEditStaffId = staff.id;
-        this.elements.staffName.value = staff.name;
-        this.elements.staffPaymentType.value = staff.type;
-        this.elements.staffAmount.value = staff.amount;
-        this.elements.staffDate.value = staff.date;
-
-        this.elements.saveStaffBtn.textContent = 'Update Payment';
-        this.elements.cancelStaffEditBtn.classList.remove('hidden');
-
-        this.elements.staffName.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        this.elements.staffName.focus();
-    },
-
-    async deleteStaffPayment(id) {
-        if (confirm('Are you sure you want to delete this payment record?')) {
-            await AppState.deleteStaffPayment(id);
-            if (this.currentEditStaffId === id) this.resetStaffForm();
-            this.renderStaffPayments();
-            this.showToast('Payment record deleted.', 'success');
-        }
-    },
-
-    renderStaffPayments() {
-        const tbody = this.elements.adminStaffBody;
-        if (!tbody) return;
-        tbody.innerHTML = '';
-
-        if (AppState.staffPayments.length === 0) {
-            tbody.innerHTML = '<tr class="empty-row"><td colspan="5" class="text-center">No staff payments recorded.</td></tr>';
-            return;
-        }
-
-        const sortedStaff = [...AppState.staffPayments].sort((a, b) => new Date(b.date) - new Date(a.date));
-
-        sortedStaff.forEach(staff => {
-            const tr = document.createElement('tr');
-            const typeLabel = staff.type === 'salary' ? 'Salary' : 'Advance';
-            const typeColor = staff.type === 'salary' ? 'var(--success)' : 'var(--warning)';
-
-            tr.innerHTML = `
-                <td class="font-medium">${staff.name}</td>
-                <td class="text-center text-sm" style="color: ${typeColor}">${typeLabel}</td>
-                <td class="text-center text-muted">${staff.date}</td>
-                <td class="text-right font-medium">${this.formatCurrency(staff.amount)}</td>
-                <td class="text-center" style="white-space: nowrap;">
-                    <button class="icon-btn" onclick="UI.editStaffPayment('${staff.id}')" title="Edit">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                    </button>
-                    <button class="icon-btn" onclick="UI.deleteStaffPayment('${staff.id}')" title="Delete">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                    </button>
-                </td>
-            `;
-            tbody.appendChild(tr);
-        });
-    },
-
-    // --- User (Billing) Views ---
-    updateItemList() {
-        const datalist = this.elements.itemList;
-        datalist.innerHTML = '';
-
-        const sortedItems = [...AppState.items].sort((a, b) => a.name.localeCompare(b.name));
-
-        sortedItems.forEach(item => {
-            const opt = document.createElement('option');
-            opt.value = item.name;
-            const typeLabel = item.type === 'weight' ? '/kg' : '/unit';
-            // We can add the price in the option text for user visibility
-            opt.textContent = `${this.formatCurrency(item.price)} ${typeLabel}`;
-            datalist.appendChild(opt);
-        });
-    },
-
-    handleItemSearchInput() {
-        const val = this.elements.itemInput.value;
-        const item = AppState.items.find(i => i.name === val);
-
-        if (item) {
-            // Valid item selected from list
-            if (item.type === 'weight') {
-                this.elements.itemQty.disabled = true;
-                this.elements.itemWeight.disabled = false;
-                this.elements.itemWeight.focus();
-                this.elements.itemWeight.select();
-            } else {
-                this.elements.itemQty.disabled = false;
-                this.elements.itemWeight.disabled = true;
-                this.elements.itemQty.focus();
-                this.elements.itemQty.select();
-            }
-        }
-    },
-
-    handleAddToBill() {
-        const itemName = this.elements.itemInput.value;
-        const item = AppState.items.find(i => i.name === itemName);
-        const qty = this.elements.itemQty.value;
-        const weight = this.elements.itemWeight.value;
-
-        if (!item) {
-            this.showToast('Please select a valid item from the list.', 'warning');
-            return;
-        }
-
-        if (AppState.addToCurrentBill(item.id, qty, weight)) {
-            this.renderCurrentBill();
-            // Reset selection
-            this.elements.itemInput.value = '';
-            this.elements.itemQty.value = '1';
-            this.elements.itemQty.disabled = false;
-            this.elements.itemWeight.value = '1';
-            this.elements.itemWeight.disabled = true;
-            this.elements.itemInput.focus();
-        } else {
-            this.showToast('Invalid quantity or weight.', 'error');
-        }
-    },
-
-    renderCurrentBill() {
-        const tbody = this.elements.billItemsBody;
-        tbody.innerHTML = '';
-
-        if (AppState.currentBill.length === 0) {
-            tbody.innerHTML = '<tr class="empty-row"><td colspan="5" class="text-center">No items added yet.</td></tr>';
-            this.elements.subTotal.textContent = '₹0.00';
-            this.elements.grandTotal.value = '0.00';
-            this.elements.grandTotal.disabled = true;
-            this.elements.billDiscount.value = 0;
-            this.elements.billDiscount.disabled = true;
-            this.elements.saveBillBtn.disabled = true;
-            return;
-        }
-
-        AppState.currentBill.forEach((bItem, index) => {
-            const tr = document.createElement('tr');
-            // Adding a sligth animation delay for rows
-            tr.style.animation = `fadeIn 0.3s ease forwards ${(index * 0.05)}s`;
-            tr.style.opacity = '0';
-
-            const qtyLabel = bItem.type === 'weight' ? `${bItem.qty} kg` : bItem.qty;
-            const priceLabel = bItem.type === 'weight' ? `${this.formatCurrency(bItem.price)}/kg` : this.formatCurrency(bItem.price);
-
-            tr.innerHTML = `
-                <td>${bItem.name}</td>
-                <td class="text-right text-sm">${priceLabel}</td>
-                <td class="text-center">${qtyLabel}</td>
-                <td class="text-right font-medium">${this.formatCurrency(bItem.total)}</td>
-                <td class="text-center">
-                    <button class="icon-btn" onclick="UI.removeBillItem('${bItem.id}')" title="Remove">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                    </button>
-                </td>
-            `;
-            tbody.appendChild(tr);
-        });
-
-        this.elements.billDiscount.disabled = false;
-        this.elements.grandTotal.disabled = false;
-        const subtotal = AppState.getCurrentBillTotal();
-        let discount = parseFloat(this.elements.billDiscount.value) || 0;
-        if (discount < 0) discount = 0;
-        if (discount > 100) discount = 100;
-
-        const grandTotal = subtotal - (subtotal * (discount / 100));
-
-        this.elements.subTotal.textContent = this.formatCurrency(subtotal);
-        this.elements.grandTotal.value = grandTotal.toFixed(2);
-        this.elements.saveBillBtn.disabled = false;
-    },
-
-    handleDiscountChange() {
-        if (AppState.currentBill.length === 0) return;
-        const subtotal = AppState.getCurrentBillTotal();
-        let discount = parseFloat(this.elements.billDiscount.value) || 0;
-        if (discount < 0) {
-            discount = 0;
-            this.elements.billDiscount.value = 0;
-        }
-
-        const grandTotal = subtotal - (subtotal * (discount / 100));
-        this.elements.grandTotal.value = grandTotal.toFixed(2);
-    },
-
-    handleGrandTotalChange() {
-        if (AppState.currentBill.length === 0) return;
-        const subtotal = AppState.getCurrentBillTotal();
-        let grandTotal = parseFloat(this.elements.grandTotal.value) || 0;
-
-        if (grandTotal < 0) {
-            grandTotal = 0;
-            this.elements.grandTotal.value = 0;
-        }
-
-        let discount = 0;
-        if (subtotal > 0) {
-            discount = ((subtotal - grandTotal) / subtotal) * 100;
-        }
-
-        // If discount is very small or negative (sur-charge), formatting to 2 decimal places
-        this.elements.billDiscount.value = discount.toFixed(2);
-    },
-
-    removeBillItem(id) {
-        AppState.removeFromCurrentBill(id);
-        this.renderCurrentBill();
-    },
-
-    async handleSaveBill() {
-        const customerName = this.elements.customerName.value.trim();
-        const date = this.elements.billDate.value;
-        const discount = parseFloat(this.elements.billDiscount.value) || 0;
-        const finalGrandTotal = parseFloat(this.elements.grandTotal.value) || 0;
-        const txType = this.elements.transactionType.value;
-
-        const saved = await AppState.saveCurrentBill(customerName, date, discount, finalGrandTotal, txType);
-        if (saved) {
-            this.showToast('Bill completely saved!', 'success');
-            AppState.clearCurrentBill();
-            this.elements.billDiscount.value = 0;
-            this.elements.transactionType.value = 'Cash';
-            this.renderCurrentBill();
-            this.renderRecentBills();
-            this.elements.customerName.value = '';
-        }
-    },
-
-    renderRecentBills() {
-        const container = this.elements.recentBillsList;
-        const totalElem = this.elements.dailyRevenueTotal;
-        const monthlyTotalElem = this.elements.monthlyRevenueTotal;
-        container.innerHTML = '';
-
-        let dailyRevenue = 0;
-
-        if (AppState.dailyBills.length === 0) {
-            container.innerHTML = '<div class="empty-state text-center text-muted text-sm mt-24">No bills processed yet today.</div>';
-            totalElem.textContent = '₹0.00';
-            if (monthlyTotalElem) {
-                monthlyTotalElem.textContent = this.formatCurrency(AppState.monthlyRevenue.total);
-            }
-            return;
-        }
-
-        // Calculate Revenue
-        dailyRevenue = AppState.dailyBills.reduce((sum, bill) => sum + bill.grandTotal, 0);
-        totalElem.textContent = this.formatCurrency(dailyRevenue);
-
-        // Display in reverse chronological
-        const reversedBills = [...AppState.dailyBills].reverse();
-
-        reversedBills.forEach(bill => {
-            const card = document.createElement('div');
-            card.className = 'bill-card fade-in';
-            card.innerHTML = `
-                <div class="bill-card-header" style="justify-content: space-between; align-items: center; margin-bottom: 0;">
-                    <span style="font-size: 15px; font-weight: 600; color: var(--text-primary); text-shadow: 0 0 10px rgba(255, 255, 255, 0.1);">${this.formatCurrency(bill.grandTotal)}</span>
-                    <span class="bill-tx-badge" style="font-size: 12px; padding: 4px 8px;">${bill.transactionType}</span>
-                </div>
-            `;
-            container.appendChild(card);
-        });
-    }
+// ── APP STATE ─────────────────────────────────────────────────────────────
+const state = {
+  panel:        "user",   // "user" | "admin"
+  adminTab:     "items",  // "items" | "activity" | "dues" | "staff" | "reports"
+  adminUnlocked: false,
+  dbReady:      null,     // null | true | false
+  items:        [],
+  transactions: [],
+  dues:         [],
+  staff:        [],
+  billItems:    [],
+  overrideAmt:  "",
+  editingItemId: null,
+  editingDueId:  null,
+  editingStaffId: null,
+  reportType:   "eod",
 };
 
-// --- PDF Generation Logic via jsPDF ---
-function generateEODReport() {
-    if (AppState.dailyBills.length === 0) {
-        UI.showToast("No bills recorded for today.", "warning");
-        return;
-    }
+// ── HELPERS ───────────────────────────────────────────────────────────────
+const fmt     = n  => "₹" + Number(n || 0).toFixed(2);
+const fmtDate = d  => new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+const today   = () => new Date().toISOString().split("T")[0];
+const thisMonth = () => new Date().toISOString().slice(0, 7);
+const uid     = () => crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
 
-    // Try to destructure the loaded library
-    const { jsPDF } = window.jspdf;
-    if (!jsPDF) {
-        UI.showToast("PDF Library failed to load.", "error");
-        return;
-    }
-
-    try {
-        const doc = new jsPDF();
-        const dateStr = new Date().toLocaleDateString();
-
-        // Header
-        doc.setFontSize(22);
-        doc.setTextColor(30, 41, 59); // Slate 800
-        doc.text("Mira Basanloy-Bills", 14, 20);
-
-        doc.setFontSize(11);
-        doc.setTextColor(100, 116, 139); // Slate 500
-        doc.text(`Generated on: ${dateStr}`, 14, 28);
-        doc.text(`Total Transactions: ${AppState.dailyBills.length}`, 14, 34);
-
-        let totalRevenue = 0;
-        let startY = 45;
-
-        // Loop over each bill to draw tables
-        AppState.dailyBills.forEach((bill, bIndex) => {
-            totalRevenue += bill.grandTotal;
-
-            // Check if we need a new page before drawing a section
-            if (startY > 250) {
-                doc.addPage();
-                startY = 20;
-            }
-
-            // Bill Context
-            doc.setFontSize(12);
-            doc.setTextColor(15, 23, 42);
-            doc.text(`Bill #${bIndex + 1} | Customer: ${bill.customerName} | Tx: ${bill.transactionType || 'Cash'} | Date: ${bill.date}`, 14, startY);
-
-            startY += 5;
-
-            // Prepare table data for the bill items
-            const heads = [['Item Name', 'Price', 'Qty/Wt', 'Total']];
-            const body = bill.items.map(item => {
-                const priceLabel = item.type === 'weight' ? `Rs. ${item.price.toFixed(2)}/kg` : `Rs. ${item.price.toFixed(2)}`;
-                const qtyLabel = item.type === 'weight' ? `${item.qty} kg` : item.qty.toString();
-
-                return [
-                    item.name,
-                    priceLabel,
-                    qtyLabel,
-                    `Rs. ${item.total.toFixed(2)}`
-                ]
-            });
-
-            // Add grand total row for this specific bill
-            if (bill.discountAmount > 0.01 || bill.discountAmount < -0.01) {
-                body.push([
-                    { content: 'Subtotal', colSpan: 3, styles: { halign: 'right' } },
-                    { content: `Rs. ${bill.subtotal.toFixed(2)}` }
-                ]);
-                const titleStr = bill.discountAmount > 0 ? `Discount (${bill.discountPercent}%)` : `Surcharge`;
-                const valStr = bill.discountAmount > 0 ? `-Rs. ${bill.discountAmount.toFixed(2)}` : `+Rs. ${Math.abs(bill.discountAmount).toFixed(2)}`;
-                const highlightColor = bill.discountAmount > 0 ? [220, 38, 38] : [59, 130, 246];
-
-                body.push([
-                    { content: titleStr, colSpan: 3, styles: { halign: 'right', textColor: highlightColor } },
-                    { content: valStr, styles: { textColor: highlightColor } }
-                ]);
-            }
-
-            body.push([
-                { content: 'Grand Total', colSpan: 3, styles: { halign: 'right', fontStyle: 'bold' } },
-                { content: `Rs. ${bill.grandTotal.toFixed(2)}`, styles: { fontStyle: 'bold' } }
-            ]);
-
-            // Draw AutoTable
-            doc.autoTable({
-                startY: startY,
-                head: heads,
-                body: body,
-                theme: 'striped',
-                headStyles: { fillColor: [59, 130, 246] }, // accent primary
-                styles: { fontSize: 10 },
-                margin: { left: 14, right: 14 }
-            });
-
-            // Update startY for next bill
-            startY = doc.lastAutoTable.finalY + 15;
-        });
-
-        // Final Summary Block
-        if (startY > 240) {
-            doc.addPage();
-            startY = 20;
-        }
-
-        // Draw Summary Box
-        doc.setFillColor(241, 245, 249); // slate 100
-        doc.roundedRect(14, startY, 182, 30, 3, 3, 'F');
-
-        doc.setFontSize(16);
-        doc.setTextColor(15, 23, 42); // slate 900
-        doc.text("End of Day Summary", 20, startY + 12);
-
-        doc.setFontSize(12);
-        doc.text(`Daily Revenue (Grand Total): Rs. ${totalRevenue.toFixed(2)}`, 20, startY + 22);
-
-        // Save the generated PDF
-        doc.save(`Store_Revenue_Report_${dateStr.replace(/\//g, '-')}.pdf`);
-        UI.showToast("PDF Report Downloaded Successfully!");
-
-    } catch (e) {
-        console.error("PDF Generation Error", e);
-        UI.showToast("Error generating PDF. Check console.", "error");
-    }
+function el(id)  { return document.getElementById(id); }
+function val(id) { return el(id) ? el(id).value.trim() : ""; }
+function setHTML(id, html) { if (el(id)) el(id).innerHTML = html; }
+function show(id) { if (el(id)) el(id).classList.remove("hidden"); }
+function hide(id) { if (el(id)) el(id).classList.add("hidden"); }
+function showToast(msg, ok = true) {
+  const t = el("toast");
+  if (!t) return;
+  t.textContent = msg;
+  t.className = "toast " + (ok ? "ok" : "error");
+  show("toast");
+  clearTimeout(window._toastTimer);
+  window._toastTimer = setTimeout(() => hide("toast"), 3000);
 }
 
-// --- Helper: generate a grouped summary report PDF ---
-function generateGroupedReport({ title, filename, bills }) {
-    const { jsPDF } = window.jspdf;
-    if (!jsPDF) {
-        UI.showToast("PDF Library failed to load.", "error");
-        return;
-    }
-    if (bills.length === 0) {
-        UI.showToast(`No bills found for ${title}.`, "warning");
-        return;
-    }
+// ── INIT ──────────────────────────────────────────────────────────────────
+document.addEventListener("DOMContentLoaded", () => {
+  el("btn-panel-user").addEventListener("click",  () => switchPanel("user"));
+  el("btn-panel-admin").addEventListener("click", () => switchPanel("admin"));
+  el("btn-refresh").addEventListener("click", loadAll);
 
-    try {
-        const doc = new jsPDF();
-        const dateStr = new Date().toLocaleDateString();
+  // Admin tabs
+  ["items","activity","dues","staff","reports"].forEach(tab => {
+    el(`tab-${tab}`).addEventListener("click", () => switchAdminTab(tab));
+  });
 
-        // Header
-        doc.setFontSize(22);
-        doc.setTextColor(30, 41, 59);
-        doc.text("Mira Basanloy-Bills", 14, 20);
+  // Admin login
+  el("btn-admin-login").addEventListener("click", adminLogin);
+  el("admin-pw-input").addEventListener("keydown", e => { if (e.key === "Enter") adminLogin(); });
+  el("btn-admin-lock").addEventListener("click",  () => { state.adminUnlocked = false; renderAdmin(); });
 
-        doc.setFontSize(13);
-        doc.setTextColor(59, 130, 246);
-        doc.text(title, 14, 28);
+  // DB setup modal
+  el("btn-setup-db").addEventListener("click",  () => show("modal-setup"));
+  el("btn-setup-db2").addEventListener("click", () => show("modal-setup"));
+  el("btn-modal-close").addEventListener("click", () => hide("modal-setup"));
+  el("btn-copy-sql").addEventListener("click",  copySQL);
+  el("btn-modal-done").addEventListener("click", () => { hide("modal-setup"); loadAll(); });
 
-        doc.setFontSize(10);
-        doc.setTextColor(100, 116, 139);
-        doc.text(`Generated: ${dateStr}  |  Total Transactions: ${bills.length}`, 14, 35);
+  // Billing form
+  el("bill-item-select").addEventListener("change", onItemSelect);
+  el("btn-add-bill-item").addEventListener("click", addBillItem);
+  el("bill-discount").addEventListener("input", updateBillSummary);
+  el("bill-override-amt").addEventListener("input", updateBillSummary);
+  el("btn-save-bill").addEventListener("click", saveBill);
 
-        let totalRevenue = bills.reduce((s, b) => s + b.grandTotal, 0);
+  // Admin - items
+  el("btn-add-item").addEventListener("click", addItem);
 
-        // Group bills by date
-        const grouped = {};
-        bills.forEach(b => {
-            if (!grouped[b.date]) grouped[b.date] = [];
-            grouped[b.date].push(b);
-        });
+  // Admin - dues
+  el("btn-add-due").addEventListener("click", addDue);
 
-        let startY = 44;
+  // Admin - staff
+  el("btn-add-staff").addEventListener("click", addStaff);
 
-        // Day-by-day breakdown
-        const sortedDays = Object.keys(grouped).sort();
-        sortedDays.forEach(day => {
-            const dayBills = grouped[day];
-            const dayTotal = dayBills.reduce((s, b) => s + b.grandTotal, 0);
-
-            if (startY > 250) { doc.addPage(); startY = 20; }
-
-            // Day header
-            doc.setFontSize(12);
-            doc.setTextColor(15, 23, 42);
-            doc.text(`Date: ${day}  (${dayBills.length} bill${dayBills.length > 1 ? 's' : ''})`, 14, startY);
-            startY += 4;
-
-            const body = dayBills.map((bill, i) => [
-                `#${i + 1} ${bill.customerName}`,
-                bill.transactionType || 'Cash',
-                `Rs. ${bill.grandTotal.toFixed(2)}`
-            ]);
-
-            // Day total row
-            body.push([
-                { content: `Day Total`, colSpan: 2, styles: { halign: 'right', fontStyle: 'bold' } },
-                { content: `Rs. ${dayTotal.toFixed(2)}`, styles: { fontStyle: 'bold', textColor: [16, 185, 129] } }
-            ]);
-
-            doc.autoTable({
-                startY: startY,
-                head: [['Customer', 'Tx Type', 'Grand Total']],
-                body: body,
-                theme: 'striped',
-                headStyles: { fillColor: [59, 130, 246] },
-                styles: { fontSize: 10 },
-                margin: { left: 14, right: 14 }
-            });
-
-            startY = doc.lastAutoTable.finalY + 12;
-        });
-
-        // Final Summary
-        if (startY > 240) { doc.addPage(); startY = 20; }
-        doc.setFillColor(241, 245, 249);
-        doc.roundedRect(14, startY, 182, 32, 3, 3, 'F');
-        doc.setFontSize(14);
-        doc.setTextColor(15, 23, 42);
-        doc.text(`${title} Summary`, 20, startY + 12);
-        doc.setFontSize(11);
-        doc.text(`Total Revenue: Rs. ${totalRevenue.toFixed(2)}`, 20, startY + 23);
-
-        doc.save(`${filename}_${dateStr.replace(/\//g, '-')}.pdf`);
-        UI.showToast("PDF Report Downloaded!");
-
-    } catch (e) {
-        console.error("PDF Generation Error", e);
-        UI.showToast("Error generating PDF. Check console.", "error");
-    }
-}
-
-function generateWeeklyReport() {
-    const now = new Date();
-    // Find start of current week (Sunday)
-    const dayOfWeek = now.getDay();
-    const weekStart = new Date(now);
-    weekStart.setDate(now.getDate() - dayOfWeek);
-    weekStart.setHours(0, 0, 0, 0);
-
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekStart.getDate() + 6);
-    weekEnd.setHours(23, 59, 59, 999);
-
-    const weekBills = AppState.allBills.filter(b => {
-        const d = new Date(b.date);
-        return d >= weekStart && d <= weekEnd;
+  // Reports
+  ["rpt-eod","rpt-weekly","rpt-monthly"].forEach(id => {
+    el(id).addEventListener("click", () => {
+      state.reportType = id.replace("rpt-","");
+      renderReportControls();
+      renderReportTable();
     });
+  });
+  ["rpt-date","rpt-week-date","rpt-month"].forEach(id => {
+    el(id).addEventListener("change", renderReportTable);
+  });
+  el("btn-dl-txt").addEventListener("click", () => downloadReport("txt"));
+  el("btn-dl-csv").addEventListener("click", () => downloadReport("csv"));
 
-    const label = `Weekly Report  |  ${weekStart.toLocaleDateString()} – ${weekEnd.toLocaleDateString()}`;
-    generateGroupedReport({ title: label, filename: 'Weekly_Revenue_Report', bills: weekBills });
-}
+  // Set default dates
+  el("bill-date").value    = today();
+  el("rpt-date").value     = today();
+  el("rpt-week-date").value = today();
+  el("rpt-month").value    = thisMonth();
+  el("staff-month").value  = thisMonth();
 
-function generateMonthlyReport() {
-    const now = new Date();
-    const month = now.getMonth();
-    const year = now.getFullYear();
-
-    const monthBills = AppState.allBills.filter(b => {
-        const d = new Date(b.date);
-        return d.getMonth() === month && d.getFullYear() === year;
-    });
-
-    const monthName = now.toLocaleString('default', { month: 'long' });
-    const label = `Monthly Report  |  ${monthName} ${year}`;
-    generateGroupedReport({ title: label, filename: `Monthly_Revenue_Report_${monthName}_${year}`, bills: monthBills });
-}
-
-// Bootstrap Application
-document.addEventListener('DOMContentLoaded', () => {
-    try {
-        console.log('DOM Content Loaded. Initializing UI...');
-        // 1. Initialize UI Elements and Event Listeners Immediately
-        UI.init();
-
-        // 2. Start Data Loading in Background (don't block the UI)
-        if (getSupabase()) {
-            AppState.init().catch(err => {
-                console.error('AppState init failed:', err);
-                UI.showToast('Database connection failed. Check internet.', 'error');
-            });
-        } else {
-            UI.showToast('Database library error. Please refresh.', 'error');
-        }
-    } catch (err) {
-        console.error('CRITICAL UI BOOTSTRAP FAILURE:', err);
-        alert('Application failed to start. Please check browser console for details.');
-    }
+  loadAll();
 });
+
+// ── DATA LOADING ──────────────────────────────────────────────────────────
+async function loadAll() {
+  show("spinner");
+  hide("db-error");
+  hide("app-content");
+  setHTML("header-status", "CONNECTING…");
+  el("header-status").className = "header-status status-loading";
+
+  try {
+    const [items, txns, dues, staff] = await Promise.all([
+      api.getItems(), api.getTransactions(), api.getDues(), api.getStaff()
+    ]);
+    state.items        = items;
+    state.transactions = txns;
+    state.dues         = dues;
+    state.staff        = staff;
+    state.dbReady      = true;
+
+    setHTML("header-status", "● SUPABASE LIVE");
+    el("header-status").className = "header-status status-live";
+    hide("btn-setup-db");
+    hide("spinner");
+    show("app-content");
+    renderAll();
+  } catch (e) {
+    state.dbReady = false;
+    setHTML("header-status", "⚠ DB SETUP NEEDED");
+    el("header-status").className = "header-status status-error";
+    show("btn-setup-db");
+    hide("spinner");
+    show("db-error");
+  }
+}
+
+// ── PANEL SWITCHING ───────────────────────────────────────────────────────
+function switchPanel(p) {
+  state.panel = p;
+  el("btn-panel-user").classList.toggle("active", p === "user");
+  el("btn-panel-admin").classList.toggle("active", p === "admin");
+  hide("panel-user");
+  hide("panel-admin");
+  show(`panel-${p}`);
+  if (p === "admin") renderAdmin();
+  if (p === "user")  renderUserPanel();
+}
+
+function switchAdminTab(tab) {
+  state.adminTab = tab;
+  ["items","activity","dues","staff","reports"].forEach(t => {
+    el(`tab-${t}`).classList.toggle("active", t === tab);
+  });
+  ["items","activity","dues","staff","reports"].forEach(t => {
+    const s = el(`admin-section-${t}`); if (s) s.classList.toggle("hidden", t !== tab);
+  });
+  renderAdminTab(tab);
+}
+
+// ── RENDER ALL ────────────────────────────────────────────────────────────
+function renderAll() {
+  renderUserPanel();
+  populateItemSelect();
+  renderAdmin();
+}
+
+// ── USER PANEL ────────────────────────────────────────────────────────────
+function renderUserPanel() {
+  populateItemSelect();
+  renderBillTable();
+  renderBillSummary();
+  renderRecentTransactions();
+}
+
+function populateItemSelect() {
+  const sel = el("bill-item-select");
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">-- Select Item --</option>';
+  state.items.forEach(item => {
+    const opt = document.createElement("option");
+    opt.value       = item.id;
+    opt.textContent = `${item.name} (${item.type === "kg" ? "per kg" : "fixed"})`;
+    sel.appendChild(opt);
+  });
+  sel.value = cur;
+}
+
+function onItemSelect() {
+  const id = val("bill-item-select");
+  const item = state.items.find(i => i.id === id);
+  if (!item) return;
+  el("bill-unit-price").value = item.price;
+  // Toggle qty / kg field
+  if (item.type === "kg") {
+    el("field-qty").classList.add("hidden");
+    el("field-kg").classList.remove("hidden");
+  } else {
+    el("field-kg").classList.add("hidden");
+    el("field-qty").classList.remove("hidden");
+  }
+  updateLineTotal();
+}
+
+function updateLineTotal() {
+  const id   = val("bill-item-select");
+  const item = state.items.find(i => i.id === id);
+  const price = parseFloat(el("bill-unit-price").value) || 0;
+  let lt = 0;
+  if (item && item.type === "kg") {
+    lt = price * (parseFloat(val("bill-kg")) || 0);
+  } else {
+    lt = price * (parseFloat(val("bill-qty")) || 1);
+  }
+  setHTML("bill-line-total", fmt(lt));
+}
+
+// Add event listeners for live line total update
+document.addEventListener("DOMContentLoaded", () => {
+  ["bill-unit-price","bill-qty","bill-kg"].forEach(id => {
+    const e = el(id); if (e) e.addEventListener("input", updateLineTotal);
+  });
+});
+
+function addBillItem() {
+  const id   = val("bill-item-select");
+  const item = state.items.find(i => i.id === id);
+  if (!item) return;
+  const price = parseFloat(el("bill-unit-price").value) || 0;
+  const qty   = parseFloat(val("bill-qty")) || 1;
+  const kg    = parseFloat(val("bill-kg"))  || 0;
+  const lt    = item.type === "kg" ? price * kg : price * qty;
+  const desc  = item.type === "kg" ? `${item.name} ×${kg}kg` : `${item.name} ×${qty}`;
+
+  state.billItems.push({ id: uid(), name: item.name, type: item.type, price, qty, kg, lt, desc });
+
+  // Reset item fields
+  el("bill-item-select").value = "";
+  el("bill-unit-price").value  = "";
+  el("bill-qty").value         = "";
+  el("bill-kg").value          = "";
+  el("field-kg").classList.add("hidden");
+  el("field-qty").classList.remove("hidden");
+  setHTML("bill-line-total", "₹0.00");
+
+  renderBillTable();
+  updateBillSummary();
+}
+
+function removeBillItem(uid) {
+  state.billItems = state.billItems.filter(b => b.id !== uid);
+  renderBillTable();
+  updateBillSummary();
+}
+
+function renderBillTable() {
+  const wrap = el("bill-items-wrap");
+  if (!wrap) return;
+  if (!state.billItems.length) { wrap.classList.add("hidden"); return; }
+  wrap.classList.remove("hidden");
+  setHTML("bill-items-body", state.billItems.map(b => `
+    <tr>
+      <td>${b.name}</td>
+      <td>${fmt(b.price)}</td>
+      <td>${b.type === "kg" ? b.kg + "kg" : "×" + (b.qty||1)}</td>
+      <td class="amount">${fmt(b.lt)}</td>
+      <td><button class="btn-outline-red" onclick="removeBillItem('${b.id}')">✕</button></td>
+    </tr>`).join(""));
+}
+
+function updateBillSummary() {
+  const sub       = state.billItems.reduce((s, b) => s + b.lt, 0);
+  const discPct   = parseFloat(el("bill-discount").value) || 0;
+  const discAmt   = sub * discPct / 100;
+  const override  = el("bill-override-amt").value;
+  const finalAmt  = override !== "" ? parseFloat(override) : sub - discAmt;
+
+  window._billCalc = { sub, discAmt, discPct, finalAmt };
+  renderBillSummary();
+}
+
+function renderBillSummary() {
+  const calc    = window._billCalc || { sub: 0, discAmt: 0, discPct: 0, finalAmt: 0 };
+  const customer = val("bill-customer");
+  const date     = val("bill-date");
+  const txType   = val("bill-tx-type");
+
+  setHTML("summary-customer", customer || "—");
+  setHTML("summary-date",     date);
+  setHTML("summary-items",    state.billItems.length);
+  setHTML("summary-subtotal", fmt(calc.sub));
+  setHTML("summary-discount", `-${fmt(calc.discAmt)} (${calc.discPct || 0}%)`);
+  setHTML("summary-payment",  (txType || "cash").toUpperCase());
+  setHTML("summary-final",    fmt(calc.finalAmt));
+}
+
+async function saveBill() {
+  const customer = val("bill-customer");
+  if (!customer || !state.billItems.length) {
+    showToast("Enter customer name and add at least one item.", false); return;
+  }
+  const calc   = window._billCalc || {};
+  const payload = {
+    customer,
+    date:             val("bill-date"),
+    items:            state.billItems,
+    subtotal:         calc.sub || 0,
+    discount:         parseFloat(el("bill-discount").value) || 0,
+    discount_amt:     calc.discAmt || 0,
+    final_amount:     calc.finalAmt || 0,
+    transaction_type: val("bill-tx-type"),
+    note:             val("bill-note")
+  };
+
+  el("btn-save-bill").disabled   = true;
+  el("btn-save-bill").textContent = "⏳ Saving…";
+
+  try {
+    const [saved] = await api.addTransaction(payload);
+    state.transactions.unshift(saved);
+
+    // Show saved bill
+    setHTML("saved-id",     "#" + (saved.id || "").slice(-6).toUpperCase());
+    setHTML("saved-name",   saved.customer);
+    setHTML("saved-date",   fmtDate(saved.date));
+    setHTML("saved-amount", fmt(saved.final_amount));
+    show("saved-bill-card");
+
+    // Reset
+    state.billItems = [];
+    state.overrideAmt = "";
+    el("bill-customer").value = "";
+    el("bill-date").value     = today();
+    el("bill-discount").value = "0";
+    el("bill-override-amt").value = "";
+    el("bill-note").value     = "";
+    window._billCalc = {};
+    renderBillTable();
+    renderBillSummary();
+    renderRecentTransactions();
+    showToast("Bill saved to Supabase ✓");
+  } catch (e) {
+    showToast("Error: " + e.message, false);
+  } finally {
+    el("btn-save-bill").disabled    = false;
+    el("btn-save-bill").textContent = "💾 Save Bill";
+  }
+}
+
+function renderRecentTransactions() {
+  const wrap = el("recent-list");
+  if (!wrap) return;
+  const rows = state.transactions.slice(0, 6);
+  if (!rows.length) { setHTML("recent-list", '<p class="text-muted" style="font-size:13px">No transactions yet</p>'); return; }
+  setHTML("recent-list", rows.map(t => `
+    <div class="recent-row">
+      <div>
+        <div class="recent-name">${t.customer}</div>
+        <div class="recent-meta">${fmtDate(t.date)} · ${(t.transaction_type || "cash").toUpperCase()}</div>
+      </div>
+      <div class="recent-amt">${fmt(t.final_amount)}</div>
+    </div>`).join(""));
+}
+
+// ── ADMIN ─────────────────────────────────────────────────────────────────
+function renderAdmin() {
+  if (!state.adminUnlocked) {
+    show("admin-login-box");
+    hide("admin-content");
+    hide("btn-admin-lock");
+  } else {
+    hide("admin-login-box");
+    show("admin-content");
+    show("btn-admin-lock");
+    renderAdminTab(state.adminTab);
+  }
+}
+
+function adminLogin() {
+  if (el("admin-pw-input").value === ADMIN_PASSWORD) {
+    state.adminUnlocked = true;
+    el("admin-pw-input").value = "";
+    hide("admin-pw-error");
+    renderAdmin();
+  } else {
+    show("admin-pw-error");
+  }
+}
+
+function renderAdminTab(tab) {
+  if (tab === "items")    renderItemsManager();
+  if (tab === "activity") renderActivity();
+  if (tab === "dues")     renderDues();
+  if (tab === "staff")    renderStaff();
+  if (tab === "reports")  { renderReportControls(); renderReportTable(); }
+}
+
+// ── ITEMS MANAGER ─────────────────────────────────────────────────────────
+function renderItemsManager() {
+  const list = el("items-list");
+  if (!list) return;
+  if (!state.items.length) { setHTML("items-list", '<p class="text-muted" style="font-size:13px">No items yet.</p>'); return; }
+
+  setHTML("items-list", state.items.map(item => {
+    if (state.editingItemId === item.id) {
+      return `
+        <div class="item-row">
+          <div class="flex-row gap-8">
+            <input id="ei-name"  value="${esc(item.name)}"  style="flex:2;min-width:90px">
+            <select id="ei-type" style="flex:1">
+              <option value="fixed" ${item.type==="fixed"?"selected":""}>Fixed</option>
+              <option value="kg"    ${item.type==="kg"   ?"selected":""}>Per Kg</option>
+            </select>
+            <input id="ei-price" type="number" value="${item.price}" style="flex:1;min-width:70px">
+            <button class="btn-sm-confirm" onclick="saveItemEdit('${item.id}')">✓</button>
+            <button class="btn-sm-cancel"  onclick="cancelItemEdit()">✕</button>
+          </div>
+        </div>`;
+    }
+    return `
+      <div class="item-row">
+        <div class="item-row-inner">
+          <div>
+            <span class="item-name">${esc(item.name)}</span>
+            <span class="badge-type">${item.type === "kg" ? "per kg" : "fixed"}</span>
+          </div>
+          <div class="item-actions">
+            <span class="item-price">${fmt(item.price)}</span>
+            <button class="btn-outline-muted" onclick="startItemEdit('${item.id}')">Edit</button>
+            <button class="btn-outline-red"   onclick="deleteItem('${item.id}')">✕</button>
+          </div>
+        </div>
+      </div>`;
+  }).join(""));
+}
+
+async function addItem() {
+  const name  = val("new-item-name");
+  const type  = val("new-item-type");
+  const price = parseFloat(val("new-item-price"));
+  if (!name || isNaN(price)) { showToast("Name and price are required.", false); return; }
+  try {
+    const [r] = await api.addItem({ name, type, price });
+    state.items.push(r);
+    state.items.sort((a,b) => a.name.localeCompare(b.name));
+    el("new-item-name").value  = "";
+    el("new-item-price").value = "";
+    renderItemsManager();
+    populateItemSelect();
+    setHTML("items-count", state.items.length);
+    showToast("Item added!");
+  } catch (e) { showToast(e.message, false); }
+}
+
+function startItemEdit(id) { state.editingItemId = id; renderItemsManager(); }
+function cancelItemEdit()   { state.editingItemId = null; renderItemsManager(); }
+
+async function saveItemEdit(id) {
+  const name  = el("ei-name")  ? el("ei-name").value.trim()  : "";
+  const type  = el("ei-type")  ? el("ei-type").value         : "fixed";
+  const price = el("ei-price") ? parseFloat(el("ei-price").value) : 0;
+  if (!name) { showToast("Name required.", false); return; }
+  try {
+    const [r] = await api.updateItem(id, { name, type, price });
+    state.items = state.items.map(i => i.id === id ? r : i);
+    state.items.sort((a,b) => a.name.localeCompare(b.name));
+    state.editingItemId = null;
+    renderItemsManager();
+    populateItemSelect();
+    showToast("Item updated!");
+  } catch (e) { showToast(e.message, false); }
+}
+
+async function deleteItem(id) {
+  if (!confirm("Delete this item?")) return;
+  try {
+    await api.deleteItem(id);
+    state.items = state.items.filter(i => i.id !== id);
+    renderItemsManager();
+    populateItemSelect();
+    setHTML("items-count", state.items.length);
+    showToast("Item deleted.");
+  } catch (e) { showToast(e.message, false); }
+}
+
+// ── ACTIVITY ──────────────────────────────────────────────────────────────
+function renderActivity() {
+  const view  = el("activity-view") ? el("activity-view").value : "daily";
+  const date  = el("activity-date")  ? el("activity-date").value  : today();
+  const month = el("activity-month") ? el("activity-month").value : thisMonth();
+
+  const data = state.transactions.filter(t =>
+    view === "daily" ? t.date === date : t.date && t.date.startsWith(month)
+  );
+  const total = data.reduce((s,t) => s + Number(t.final_amount||0), 0);
+
+  setHTML("act-count",   data.length);
+  setHTML("act-revenue", fmt(total));
+  setHTML("act-avg",     data.length ? fmt(total / data.length) : "₹0");
+
+  if (!data.length) {
+    setHTML("activity-tbody", `<tr><td colspan="6" class="text-muted" style="text-align:center;padding:24px">No transactions found</td></tr>`);
+    return;
+  }
+  setHTML("activity-tbody", data.map(t => `
+    <tr>
+      <td>${esc(t.customer)}</td>
+      <td>${fmtDate(t.date)}</td>
+      <td>${Array.isArray(t.items) ? t.items.length : 0}</td>
+      <td><span class="badge">${(t.transaction_type||"cash").toUpperCase()}</span></td>
+      <td>${t.discount||0}%</td>
+      <td class="amount">${fmt(t.final_amount)}</td>
+    </tr>`).join(""));
+  setHTML("act-total", fmt(total));
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const av = el("activity-view");
+  if (av) av.addEventListener("change", () => {
+    if (av.value === "daily") { show("activity-date-wrap"); hide("activity-month-wrap"); }
+    else                      { hide("activity-date-wrap"); show("activity-month-wrap"); }
+    renderActivity();
+  });
+  const ad = el("activity-date");  if (ad) ad.addEventListener("change", renderActivity);
+  const am = el("activity-month"); if (am) am.addEventListener("change", renderActivity);
+
+  if (el("activity-date"))  el("activity-date").value  = today();
+  if (el("activity-month")) el("activity-month").value = thisMonth();
+});
+
+// ── DUES ──────────────────────────────────────────────────────────────────
+function renderDues() {
+  const cust = state.dues.filter(d => d.type === "customer");
+  const vend = state.dues.filter(d => d.type === "vendor");
+
+  setHTML("dues-cust-total", fmt(cust.reduce((s,d)=>s+d.amount,0)));
+  setHTML("dues-vend-total", fmt(vend.reduce((s,d)=>s+d.amount,0)));
+
+  renderDueList("dues-cust-list", cust);
+  renderDueList("dues-vend-list", vend);
+}
+
+function renderDueList(containerId, data) {
+  if (!data.length) {
+    setHTML(containerId, '<p class="text-muted" style="font-size:13px">No entries</p>');
+    return;
+  }
+  setHTML(containerId, data.map(d => {
+    if (state.editingDueId === d.id) {
+      return `
+        <div class="due-row">
+          <div>
+            <div class="due-name">${esc(d.name)}</div>
+            <div class="due-meta">${esc(d.note||"")} · ${fmtDate(d.created_at)}</div>
+          </div>
+          <div class="flex-row gap-8">
+            <input id="de-amt" type="number" value="${d.amount}" style="width:100px">
+            <button class="btn-sm-confirm" onclick="saveDueEdit('${d.id}')">✓</button>
+            <button class="btn-sm-cancel"  onclick="cancelDueEdit()">✕</button>
+          </div>
+        </div>`;
+    }
+    return `
+      <div class="due-row">
+        <div>
+          <div class="due-name">${esc(d.name)}</div>
+          <div class="due-meta">${esc(d.note||"")} · ${fmtDate(d.created_at)}</div>
+        </div>
+        <div class="flex-row gap-8">
+          <span class="text-gold text-bold">${fmt(d.amount)}</span>
+          <button class="btn-outline-muted" onclick="startDueEdit('${d.id}')">Edit</button>
+          <button class="btn-outline-red"   onclick="deleteDue('${d.id}')">✕</button>
+        </div>
+      </div>`;
+  }).join(""));
+}
+
+async function addDue() {
+  const name   = val("due-name");
+  const type   = val("due-type");
+  const amount = parseFloat(val("due-amount"));
+  const note   = val("due-note");
+  if (!name || isNaN(amount)) { showToast("Name and amount required.", false); return; }
+  try {
+    const [r] = await api.addDue({ name, type, amount, note });
+    state.dues.unshift(r);
+    el("due-name").value = ""; el("due-amount").value = ""; el("due-note").value = "";
+    renderDues();
+    showToast("Due entry added!");
+  } catch (e) { showToast(e.message, false); }
+}
+
+function startDueEdit(id) { state.editingDueId = id; renderDues(); }
+function cancelDueEdit()   { state.editingDueId = null; renderDues(); }
+
+async function saveDueEdit(id) {
+  const amt = parseFloat(el("de-amt") ? el("de-amt").value : 0);
+  try {
+    const [r] = await api.updateDue(id, { amount: amt });
+    state.dues = state.dues.map(d => d.id === id ? r : d);
+    state.editingDueId = null;
+    renderDues();
+    showToast("Amount updated!");
+  } catch (e) { showToast(e.message, false); }
+}
+
+async function deleteDue(id) {
+  if (!confirm("Remove this due entry?")) return;
+  try {
+    await api.deleteDue(id);
+    state.dues = state.dues.filter(d => d.id !== id);
+    renderDues();
+    showToast("Entry removed.");
+  } catch (e) { showToast(e.message, false); }
+}
+
+// ── STAFF ─────────────────────────────────────────────────────────────────
+function renderStaff() {
+  const list = el("staff-list");
+  if (!list) return;
+  setHTML("staff-count", state.staff.length);
+  if (!state.staff.length) {
+    setHTML("staff-tbody", `<tr><td colspan="7" class="text-muted" style="text-align:center;padding:24px">No staff added</td></tr>`);
+    return;
+  }
+  setHTML("staff-tbody", state.staff.map(s => {
+    const bal = s.salary - s.paid;
+    if (state.editingStaffId === s.id) {
+      return `
+        <tr>
+          <td><input id="se-name"   value="${esc(s.name)}"  style="width:100px"></td>
+          <td><input id="se-role"   value="${esc(s.role||"")}" style="width:90px"></td>
+          <td><input id="se-month"  type="month" value="${s.month||""}" style="width:110px"></td>
+          <td><input id="se-sal"    type="number" value="${s.salary}" style="width:90px"></td>
+          <td><input id="se-paid"   type="number" value="${s.paid}"   style="width:90px"></td>
+          <td></td>
+          <td>
+            <button class="btn-sm-confirm" onclick="saveStaffEdit('${s.id}')" style="margin-right:4px">✓</button>
+            <button class="btn-sm-cancel"  onclick="cancelStaffEdit()">✕</button>
+          </td>
+        </tr>`;
+    }
+    return `
+      <tr>
+        <td><b>${esc(s.name)}</b></td>
+        <td>${esc(s.role||"—")}</td>
+        <td>${s.month||"—"}</td>
+        <td>${fmt(s.salary)}</td>
+        <td class="text-green">${fmt(s.paid)}</td>
+        <td class="${bal > 0 ? "text-red" : "text-green"}">${fmt(bal)}</td>
+        <td><button class="btn-outline-muted" onclick="startStaffEdit('${s.id}')">Edit</button></td>
+      </tr>`;
+  }).join(""));
+}
+
+async function addStaff() {
+  const name   = val("staff-name");
+  const role   = val("staff-role");
+  const salary = parseFloat(val("staff-salary"));
+  const paid   = parseFloat(val("staff-paid")) || 0;
+  const month  = val("staff-month");
+  if (!name || isNaN(salary)) { showToast("Name and salary required.", false); return; }
+  try {
+    const [r] = await api.addStaff({ name, role, salary, paid, month });
+    state.staff.unshift(r);
+    el("staff-name").value = ""; el("staff-role").value = ""; el("staff-salary").value = ""; el("staff-paid").value = "";
+    renderStaff();
+    showToast("Staff added!");
+  } catch (e) { showToast(e.message, false); }
+}
+
+function startStaffEdit(id) { state.editingStaffId = id; renderStaff(); }
+function cancelStaffEdit()   { state.editingStaffId = null; renderStaff(); }
+
+async function saveStaffEdit(id) {
+  const g = id => el(id) ? el(id).value : "";
+  try {
+    const [r] = await api.updateStaff(id, {
+      name:   g("se-name"), role: g("se-role"), month: g("se-month"),
+      salary: parseFloat(g("se-sal"))  || 0,
+      paid:   parseFloat(g("se-paid")) || 0
+    });
+    state.staff = state.staff.map(s => s.id === id ? r : s);
+    state.editingStaffId = null;
+    renderStaff();
+    showToast("Staff updated!");
+  } catch (e) { showToast(e.message, false); }
+}
+
+// ── REPORTS ───────────────────────────────────────────────────────────────
+function renderReportControls() {
+  const rt = state.reportType;
+  ["eod","weekly","monthly"].forEach(r => {
+    el(`rpt-${r}`).classList.toggle("active", r === rt);
+  });
+  el("rpt-date-wrap").classList.toggle("hidden",    rt !== "eod");
+  el("rpt-week-wrap").classList.toggle("hidden",    rt !== "weekly");
+  el("rpt-month-wrap").classList.toggle("hidden",   rt !== "monthly");
+}
+
+function getReportData() {
+  const rt = state.reportType;
+  const date  = val("rpt-date");
+  const wk    = val("rpt-week-date");
+  const month = val("rpt-month");
+  if (rt === "eod")     return state.transactions.filter(t => t.date === date);
+  if (rt === "weekly")  {
+    const s = new Date(wk), e = new Date(wk); e.setDate(e.getDate() + 6);
+    return state.transactions.filter(t => { const d = new Date(t.date); return d >= s && d <= e; });
+  }
+  return state.transactions.filter(t => t.date && t.date.startsWith(month));
+}
+
+function renderReportTable() {
+  const data  = getReportData();
+  const total = data.reduce((s,t) => s + Number(t.final_amount||0), 0);
+
+  setHTML("rpt-count",   data.length);
+  setHTML("rpt-revenue", fmt(total));
+  setHTML("rpt-avg",     data.length ? fmt(total / data.length) : "₹0");
+
+  if (!data.length) {
+    setHTML("rpt-tbody", `<tr><td colspan="6" style="text-align:center;padding:36px;color:var(--muted3)">No transactions in this period</td></tr>`);
+    setHTML("rpt-total", "₹0.00");
+    return;
+  }
+  setHTML("rpt-tbody", data.map(t => `
+    <tr>
+      <td>${esc(t.customer)}</td>
+      <td>${fmtDate(t.date)}</td>
+      <td>${Array.isArray(t.items) ? t.items.length : 0}</td>
+      <td><span class="badge">${(t.transaction_type||"cash").toUpperCase()}</span></td>
+      <td>${t.discount||0}%</td>
+      <td class="amount">${fmt(t.final_amount)}</td>
+    </tr>`).join(""));
+  setHTML("rpt-total", fmt(total));
+}
+
+function downloadReport(type) {
+  const data  = getReportData();
+  const total = data.reduce((s,t) => s + Number(t.final_amount||0), 0);
+  const rt    = state.reportType;
+  const label = rt === "eod" ? `EOD-${val("rpt-date")}` : rt === "weekly" ? `Weekly-${val("rpt-week-date")}` : `Monthly-${val("rpt-month")}`;
+
+  let content = "", mime = "", ext = "";
+
+  if (type === "txt") {
+    const sep = "=".repeat(56);
+    const lines = [sep, "             STOREBILL REPORT", `  ${label}`, sep,
+      `Generated: ${new Date().toLocaleString("en-IN")}`,
+      `Transactions: ${data.length}  |  Revenue: ${fmt(total)}`,
+      "-".repeat(56)];
+    data.forEach((t,i) => {
+      lines.push(`${i+1}. ${t.customer} | ${fmtDate(t.date)} | ${(t.transaction_type||"").toUpperCase()} | ${fmt(t.final_amount)}`);
+      (Array.isArray(t.items) ? t.items : []).forEach(x => lines.push(`   - ${x.desc||x.name}: ${fmt(x.lt||x.lineTotal||0)}`));
+      if (t.discount > 0) lines.push(`   Discount: ${t.discount}% (-${fmt(t.discount_amt)})`);
+    });
+    lines.push(sep, `TOTAL: ${fmt(total)}`, sep);
+    content = lines.join("\n"); mime = "text/plain"; ext = "txt";
+  } else {
+    const rows = [["#","Customer","Date","Items","Payment","Subtotal","Discount%","Final Amount"]];
+    data.forEach((t,i) => rows.push([i+1, t.customer, t.date, Array.isArray(t.items)?t.items.length:0,
+      t.transaction_type||"", Number(t.subtotal||0).toFixed(2), t.discount||0, Number(t.final_amount||0).toFixed(2)]));
+    content = rows.map(r => r.join(",")).join("\n"); mime = "text/csv"; ext = "csv";
+  }
+
+  const a = Object.assign(document.createElement("a"), {
+    href: URL.createObjectURL(new Blob([content], { type: mime })),
+    download: `${label}.${ext}`
+  });
+  a.click();
+}
+
+// ── COPY SQL ──────────────────────────────────────────────────────────────
+const SETUP_SQL = `create table if not exists items (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  type text not null default 'fixed',
+  price numeric not null default 0,
+  created_at timestamptz default now()
+);
+create table if not exists transactions (
+  id uuid primary key default gen_random_uuid(),
+  customer text not null,
+  date date not null,
+  items jsonb,
+  subtotal numeric,
+  discount numeric default 0,
+  discount_amt numeric default 0,
+  final_amount numeric,
+  transaction_type text,
+  note text,
+  created_at timestamptz default now()
+);
+create table if not exists dues (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  type text not null,
+  amount numeric not null default 0,
+  note text,
+  created_at timestamptz default now()
+);
+create table if not exists staff (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  role text,
+  salary numeric default 0,
+  paid numeric default 0,
+  month text,
+  created_at timestamptz default now()
+);`;
+
+function copySQL() {
+  navigator.clipboard.writeText(SETUP_SQL).then(() => {
+    el("btn-copy-sql").textContent = "✓ Copied!";
+    setTimeout(() => { el("btn-copy-sql").textContent = "📋 Copy SQL"; }, 2000);
+  });
+}
+
+// ── ESCAPE HTML ───────────────────────────────────────────────────────────
+function esc(str) {
+  return String(str || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+// ── EXPOSE TO HTML onclick ────────────────────────────────────────────────
+window.removeBillItem  = removeBillItem;
+window.startItemEdit   = startItemEdit;
+window.cancelItemEdit  = cancelItemEdit;
+window.saveItemEdit    = saveItemEdit;
+window.deleteItem      = deleteItem;
+window.startDueEdit    = startDueEdit;
+window.cancelDueEdit   = cancelDueEdit;
+window.saveDueEdit     = saveDueEdit;
+window.deleteDue       = deleteDue;
+window.startStaffEdit  = startStaffEdit;
+window.cancelStaffEdit = cancelStaffEdit;
+window.saveStaffEdit   = saveStaffEdit;

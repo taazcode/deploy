@@ -1,395 +1,477 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>⚡ Mira Basanloy-Bills</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
-    <!-- jsPDF libraries for PDF Generation -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-    <!-- Supabase JS Client -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StoreBill — Billing Management</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
-
 <body>
-    <div class="app-container">
-        <!-- Floating Animated Background Entities -->
-        <div class="blob blob-1"></div>
-        <div class="blob blob-2"></div>
- 
-        <header class="glass-header">
-            <div class="logo">
-                <span class="logo-icon">⚡</span>
-                <h1>MIRA Basanaloy<span> Bills</span></h1>
-            </div>
-            <nav class="view-toggles">
-                <button id="navUser" class="nav-btn active">Invoice Panel</button>
-                <button id="navAdmin" class="nav-btn">Admin Panel</button>
-                <button id="generatePdfBtn" class="primary-btn pulse-glow">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
-                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                        style="margin-right: 6px;">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                        <polyline points="7 10 12 15 17 10"></polyline>
-                        <line x1="12" y1="15" x2="12" y2="3"></line>
-                    </svg>
-                    EOD Report
-                </button>
-                <button id="generateWeeklyBtn" class="primary-btn" style="background: linear-gradient(135deg, #7c3aed, #a855f7);">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
-                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                        style="margin-right: 6px;">
-                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                        <line x1="16" y1="2" x2="16" y2="6"></line>
-                        <line x1="8" y1="2" x2="8" y2="6"></line>
-                        <line x1="3" y1="10" x2="21" y2="10"></line>
-                    </svg>
-                    Weekly
-                </button>
-                <button id="generateMonthlyBtn" class="primary-btn" style="background: linear-gradient(135deg, #0891b2, #22d3ee);">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
-                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                        style="margin-right: 6px;">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                        <polyline points="14 2 14 8 20 8"></polyline>
-                    </svg>
-                    Monthly
-                </button>
-            </nav>
-        </header>
 
-        <main class="content-area">
-            <!-- User Panel -->
-            <section id="userPanel" class="panel fade-in active">
-                <div class="panel-header">
-                    <h2>Create Bill</h2>
-                    <p>Enter customer details and add items to generate a bill.</p>
-                </div>
-
-                <div class="billing-wrapper">
-                    <!-- Bill Creation Form -->
-                        <div class="billing-grid">
-                    <div class="customer-section glass-card">
-                        <h3>Customer Details</h3>
-                        <div class="form-group">
-                            <label for="customerName">Customer Name</label>
-                            <input type="text" id="customerName" placeholder="e.g. chandan paul" autocomplete="off">
-                        </div>
-                        <div class="form-group">
-                            <label for="billDate">Date</label>
-                            <input type="date" id="billDate">
-                        </div>
-                    </div>
-
-                    <div class="add-item-section glass-card">
-                        <h3>Add Item</h3>
-                        <div class="form-row">
-                            <div class="form-group flex-2">
-                                <label for="itemInput">Select Item (Search)</label>
-                                <input type="text" id="itemInput" list="itemList" placeholder="e.g. Rice or Milk" autocomplete="off">
-                                <datalist id="itemList">
-                                    <!-- Options injected via JS -->
-                                </datalist>
-                            </div>
-                            <div class="form-group flex-1">
-                                <label for="itemQty">Quantity (Units)</label>
-                                <input type="number" id="itemQty" value="1" min="1" step="1">
-                            </div>
-                            <div class="form-group flex-1">
-                                <label for="itemWeight">Weight (Kg)</label>
-                                <input type="number" id="itemWeight" value="1" min="0.01" step="0.01" disabled>
-                            </div>
-                            <div class="form-group flex-1 align-bottom">
-                                <button id="addItemBtn" class="action-btn w-full">Add to Bill</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="current-bill-section glass-card mt-24">
-                    <div class="flex-between">
-                        <h3>Current Bill Items</h3>
-                        <button id="clearBillBtn" class="text-btn danger-text">Clear Bill</button>
-                    </div>
-                    <div class="table-container mt-16">
-                        <table class="data-table" id="currentBillTable">
-                            <thead>
-                                <tr>
-                                    <th>Item Name</th>
-                                    <th class="text-right">Price</th>
-                                    <th class="text-center">Qty/Wt</th>
-                                    <th class="text-right">Total</th>
-                                    <th class="text-center">Action</th>
-                                </tr>
-                            </thead>
-                            <tbody id="billItemsBody">
-                                <!-- Bill items injected via JS -->
-                                <tr class="empty-row">
-                                    <td colspan="5" class="text-center">No items added yet.</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <div class="bill-summary mt-24">
-                        <div class="flex-between mb-16" style="align-items: center;">
-                            <span style="font-weight: 500; color: var(--text-secondary);">Subtotal: <span id="subTotal" style="color: var(--text-primary);">₹0.00</span></span>
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <label for="billDiscount" style="margin-bottom: 0;">Discount (%):</label>
-                                <input type="number" id="billDiscount" value="0" min="0" max="100" style="width: 100px; padding: 6px 12px;" autocomplete="off" disabled>
-                            </div>
-                        </div>
-                        <div class="total-row pt-16" style="border-top: 1px solid var(--glass-border); padding-top: 16px;">
-                            <span>Grand Total (₹)</span>
-                            <input type="number" id="grandTotal" class="total-amount-input" value="0.00" min="0" step="0.01" disabled style="background: transparent; border: 1px solid rgba(255,255,255,0.2); color: var(--success); font-size: 24px; font-weight: 700; text-align: right; width: 180px; padding: 4px 8px; border-radius: var(--border-radius-sm);">
-                        </div>
-                        <div class="form-row mt-16">
-                            <div class="form-group flex-1">
-                                <label for="transactionType">Transaction Type</label>
-                                <select id="transactionType">
-                                    <option value="Cash">Cash</option>
-                                    <option value="UPI">UPI / QR Code</option>
-                                </select>
-                            </div>
-                            <div class="form-group flex-2 align-bottom">
-                                <button id="saveBillBtn" class="primary-btn large-btn w-full shadow-glow" disabled>Complete & Save Bill</button>
-                            </div>
-                    </div>
-                </div>
-             
-            </section>
-
-            <!-- Admin Panel -->
-            <section id="adminPanel" class="panel fade-in">
-                <div id="adminPasswordScreen" class="password-overlay active">
-                    <div class="glass-card text-center" style="max-width: 400px; padding: 40px; margin: 100px auto;">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--primary); margin-bottom: 16px;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-                        <h2 style="margin-bottom: 8px;">Admin Login</h2>
-                        <p class="text-sm text-muted mb-24">Enter password to access store settings.</p>
-                        <div class="form-group text-left">
-                            <input type="password" id="adminPasswordInput" placeholder="Password" style="text-align: center;">
-                        </div>
-                        <button id="adminLoginBtn" class="primary-btn w-full mt-16 shadow-glow">Access Panel</button>
-                    </div>
-                </div>
-
-                <div id="adminContentWrapper" class="hidden">
-                    <div class="panel-header">
-                        <h2>Admin Panel</h2>
-                        <p>Manage store inventory, pricing, and dues.</p>
-                    </div>
-
-                <div class="admin-grid">
-                    <div class="add-new-item glass-card">
-                        <h3>Add / Edit Item</h3>
-                        <p class="text-sm text-muted mb-16">Enter an existing item name to update its price.</p>
-                        <form id="adminItemForm">
-                            <div class="form-group">
-                                <label for="adminItemName">Item Name</label>
-                                <input type="text" id="adminItemName" list="adminItemDataList" placeholder="e.g. Rice or Keyboard (Type to search)" required autocomplete="off">
-                                <datalist id="adminItemDataList"></datalist>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group flex-1">
-                                    <label for="adminItemPrice">Price (₹)</label>
-                                    <input type="number" id="adminItemPrice" step="0.01" min="0" placeholder="0.00" required>
-                                </div>
-                                <div class="form-group flex-1">
-                                    <label for="adminItemType">Pricing Type</label>
-                                    <select id="adminItemType">
-                                        <option value="fixed">Fixed Price (Per Unit)</option>
-                                        <option value="weight">Per Kg</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <button type="submit" id="adminSaveBtn" class="action-btn w-full mt-16 shadow-glow">Save Item</button>
-                            <div style="display: flex; gap: 8px; margin-top: 8px;">
-                                <button type="button" id="adminDeleteBtn" class="danger-btn w-full hidden" style="padding: 8px;">Delete</button>
-                                <button type="button" id="adminCancelEditBtn" class="text-btn text-muted w-full hidden">Cancel Edit</button>
-                            </div>
-                        </form>
-                    </div>
-
-                    <!-- Today's Store Activity (Shifted into grid) -->
-                    <div class="store-activity-container glass-card" style="display: flex; flex-direction: column;">
-                        <div style="flex-shrink: 0; padding-bottom: 16px; margin-bottom: 16px; border-bottom: 1px solid var(--glass-border);">
-                            <h3 style="margin-bottom: 4px;">Store Activity</h3>
-                            <p class="text-sm text-muted mb-8">Transactions and Revenue.</p>
-                            <div style="display: flex; gap: 12px;">
-                                <div class="today-revenue" style="flex: 1; background: rgba(16, 185, 129, 0.1); padding: 12px; border-radius: var(--border-radius-sm); border: 1px solid rgba(16, 185, 129, 0.2);">
-                                    <div style="font-weight: 500; color: var(--text-primary); font-size: 13px; margin-bottom: 4px;">Today's Total</div>
-                                    <div id="dailyRevenueTotal" style="font-size: 20px; font-weight: 700; color: var(--success); text-shadow: 0 0 12px rgba(16, 185, 129, 0.4);">₹0.00</div>
-                                </div>
-                                <div class="monthly-revenue" style="flex: 1; background: rgba(59, 130, 246, 0.1); padding: 12px; border-radius: var(--border-radius-sm); border: 1px solid rgba(59, 130, 246, 0.2);">
-                                    <div style="font-weight: 500; color: var(--text-primary); font-size: 13px; margin-bottom: 4px;">Monthly Revenue</div>
-                                    <div id="monthlyRevenueTotal" style="font-size: 20px; font-weight: 700; color: #3b82f6; text-shadow: 0 0 12px rgba(59, 130, 246, 0.4);">₹0.00</div>
-                                </div>
-                            </div>
-                        </div>
-                        <div id="recentBillsList" class="recent-bills-list" style="overflow-y: auto; max-height: 400px; padding-right: 4px;">
-                            <!-- Injected via JS -->
-                            <div class="empty-state text-center text-muted text-sm mt-24">
-                                No bills processed yet today.
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="admin-grid mt-24">
-                    <div class="dues-form-container glass-card">
-                        <h3>Log Customer Due / Vendor Payable</h3>
-                        <p class="text-sm text-muted mb-16">Track credits given or payments owed to suppliers.</p>
-                        <form id="adminDueForm">
-                            <div class="form-row">
-                                <div class="form-group flex-2">
-                                    <label for="dueName">Entity Name (Customer / Vendor)</label>
-                                    <input type="text" id="dueName" placeholder="e.g. Rahul Or Supplier Co." required autocomplete="off">
-                                </div>
-                                <div class="form-group flex-1">
-                                    <label for="dueType">Type</label>
-                                    <select id="dueType">
-                                        <option value="receive">Customer Owed (+)</option>
-                                        <option value="pay">Vendor Payable (-)</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group flex-1">
-                                    <label for="dueAmount">Amount (₹)</label>
-                                    <input type="number" id="dueAmount" step="0.01" min="0" placeholder="0.00" required>
-                                </div>
-                                <div class="form-group flex-1">
-                                    <label for="dueDate">Date Recorded</label>
-                                    <input type="date" id="dueDate" required>
-                                </div>
-                                <div class="form-group flex-1 align-bottom">
-                                    <button type="submit" id="saveDueBtn" class="action-btn w-full shadow-glow">Save Entry</button>
-                                    <button type="button" id="cancelDueEditBtn" class="text-btn text-muted w-full mt-8 hidden">Cancel Edit</button>
-                                </div>
-                            </div>
-                        </form>
-                    </div>
-
-                    <div class="dues-list-container glass-card">
-                        <div class="flex-between">
-                            <h3>Active Ledger</h3>
-                        </div>
-                        <div class="table-container list-scrollable mt-16" style="max-height: 250px;">
-                            <table class="data-table" id="adminDuesTable">
-                                <thead>
-                                    <tr>
-                                        <th>Name</th>
-                                        <th class="text-center">Type</th>
-                                        <th class="text-center">Date</th>
-                                        <th class="text-right">Amount (₹)</th>
-                                        <th class="text-center">Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="adminDuesBody">
-                                    <!-- Dues injected via JS -->
-                                    <tr class="empty-row">
-                                        <td colspan="5" class="text-center">No active dues or payables.</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="admin-grid mt-24">
-                    <div class="staff-form-container glass-card">
-                        <h3>Staff Management & Payments</h3>
-                        <p class="text-sm text-muted mb-16">Log employee salaries or advance payments.</p>
-                        <form id="adminStaffForm">
-                            <div class="form-row">
-                                <div class="form-group flex-2">
-                                    <label for="staffName">Staff Name</label>
-                                    <input type="text" id="staffName" placeholder="e.g. Amit or Priya" required autocomplete="off">
-                                </div>
-                                <div class="form-group flex-1">
-                                    <label for="staffPaymentType">Payment Type</label>
-                                    <select id="staffPaymentType">
-                                        <option value="salary">Salary Settlement</option>
-                                        <option value="advance">Advance Payment</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group flex-1">
-                                    <label for="staffAmount">Amount (₹)</label>
-                                    <input type="number" id="staffAmount" step="0.01" min="0" placeholder="0.00" required>
-                                </div>
-                                <div class="form-group flex-1">
-                                    <label for="staffDate">Date Paid</label>
-                                    <input type="date" id="staffDate" required>
-                                </div>
-                                <div class="form-group flex-1 align-bottom">
-                                    <button type="submit" id="saveStaffBtn" class="action-btn w-full shadow-glow">Save Payment</button>
-                                    <button type="button" id="cancelStaffEditBtn" class="text-btn text-muted w-full mt-8 hidden">Cancel Edit</button>
-                                </div>
-                            </div>
-                        </form>
-                    </div>
-
-                    <div class="staff-list-container glass-card">
-                        <div class="flex-between">
-                            <h3>Staff Ledger</h3>
-                        </div>
-                        <div class="table-container list-scrollable mt-16" style="max-height: 250px;">
-                            <table class="data-table" id="adminStaffTable">
-                                <thead>
-                                    <tr>
-                                        <th>Name</th>
-                                        <th class="text-center">Type</th>
-                                        <th class="text-center">Date</th>
-                                        <th class="text-right">Amount (₹)</th>
-                                        <th class="text-center">Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="adminStaffBody">
-                                    <!-- Staff payments injected via JS -->
-                                    <tr class="empty-row">
-                                        <td colspan="5" class="text-center">No staff payments recorded.</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="danger-zone glass-card mt-24 border-danger">
-                    <div class="danger-header">
-                        <div class="danger-icon">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
-                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                                stroke-linejoin="round">
-                                <path
-                                    d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z">
-                                </path>
-                                <line x1="12" y1="9" x2="12" y2="13"></line>
-                                <line x1="12" y1="17" x2="12.01" y2="17"></line>
-                            </svg>
-                        </div>
-                        <div>
-                            <h3 class="danger-text">Data Management</h3>
-                            <p class="text-sm text-muted">Clear all bills today and revenue for a fresh start.</p>
-                        </div>
-                    </div>
-                    <button id="clearDataBtn" class="danger-btn mt-16">Clear All Daily Data</button>
-                </div>
-                </div> <!-- End Admin Content Wrapper -->
-            </section>
-        </main>
-
-        <!-- Toast Notification Container -->
-        <div id="toastContainer" class="toast-container"></div>
+<!-- ════════════════════════════════════════════════════════
+     HEADER
+═════════════════════════════════════════════════════════ -->
+<header class="header">
+  <div class="header-logo">
+    <div class="header-icon">🏪</div>
+    <div>
+      <div class="header-title">StoreBill</div>
+      <div id="header-status" class="header-status status-loading">CONNECTING…</div>
     </div>
+  </div>
+  <div class="header-nav">
+    <button id="btn-setup-db"    class="btn btn-outline-gold hidden">🛠 Setup DB</button>
+    <button id="btn-refresh"     class="btn btn-ghost">⟳</button>
+    <button id="btn-panel-user"  class="btn-panel active">👤 Billing</button>
+    <button id="btn-panel-admin" class="btn-panel">🔒 Admin</button>
+  </div>
+</header>
 
-    <script src="app.js"></script>
+<!-- TOAST -->
+<div id="toast" class="toast hidden"></div>
+
+<!-- ════════════════════════════════════════════════════════
+     DB SETUP MODAL
+═════════════════════════════════════════════════════════ -->
+<div id="modal-setup" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">🛠 One-Time Database Setup</div>
+      <button id="btn-modal-close" class="modal-close">✕</button>
+    </div>
+    <p class="modal-body">
+      Go to <strong>Supabase → SQL Editor → New Query</strong>, paste and run the SQL below.
+      Then click <em>Done, Refresh</em>.
+    </p>
+    <pre>create table if not exists items (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  type text not null default 'fixed',
+  price numeric not null default 0,
+  created_at timestamptz default now()
+);
+create table if not exists transactions (
+  id uuid primary key default gen_random_uuid(),
+  customer text not null,
+  date date not null,
+  items jsonb,
+  subtotal numeric,
+  discount numeric default 0,
+  discount_amt numeric default 0,
+  final_amount numeric,
+  transaction_type text,
+  note text,
+  created_at timestamptz default now()
+);
+create table if not exists dues (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  type text not null,
+  amount numeric not null default 0,
+  note text,
+  created_at timestamptz default now()
+);
+create table if not exists staff (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  role text,
+  salary numeric default 0,
+  paid numeric default 0,
+  month text,
+  created_at timestamptz default now()
+);</pre>
+    <div class="flex-row mt-16">
+      <button id="btn-copy-sql"   class="btn btn-gold" style="flex:1">📋 Copy SQL</button>
+      <button id="btn-modal-done" class="btn" style="flex:1;background:rgba(46,204,113,.15);border:1px solid #2ecc71;color:#2ecc71">⟳ Done, Refresh</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     MAIN
+═════════════════════════════════════════════════════════ -->
+<main>
+
+  <!-- SPINNER -->
+  <div id="spinner" class="spinner-wrap">
+    <div class="spinner"></div>
+    <div class="spinner-label">Connecting to Supabase…</div>
+  </div>
+
+  <!-- DB ERROR -->
+  <div id="db-error" class="db-error-wrap hidden">
+    <div class="db-error-box">
+      <div class="db-error-icon">⚠️</div>
+      <div class="db-error-title">Database Tables Not Found</div>
+      <div class="db-error-sub">Create the required tables in Supabase first.</div>
+      <button id="btn-setup-db2" class="btn btn-gold" style="padding:12px 32px;font-size:15px">🛠 View Setup SQL</button>
+    </div>
+  </div>
+
+  <!-- APP CONTENT -->
+  <div id="app-content" class="hidden">
+
+    <!-- ══════════════════════════════════════════
+         USER / BILLING PANEL
+    ═══════════════════════════════════════════ -->
+    <div id="panel-user">
+      <h2 class="page-title">📋 New Bill</h2>
+      <div class="grid-bill">
+
+        <!-- LEFT COLUMN -->
+        <div class="flex-col">
+
+          <!-- Customer Info -->
+          <div class="card">
+            <div class="card-title">Customer Info</div>
+            <div class="grid-2col">
+              <div class="field">
+                <label>Customer Name</label>
+                <input id="bill-customer" type="text" placeholder="Enter name…" />
+              </div>
+              <div class="field">
+                <label>Date</label>
+                <input id="bill-date" type="date" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Add Item -->
+          <div class="card">
+            <div class="card-title">Add Item</div>
+            <div class="grid-item-form">
+              <div class="field">
+                <label>Item</label>
+                <select id="bill-item-select"><option value="">-- Select Item --</option></select>
+              </div>
+              <div class="field">
+                <label>Unit Price (₹)</label>
+                <input id="bill-unit-price" type="number" placeholder="0.00" />
+              </div>
+              <div id="field-qty" class="field">
+                <label>Quantity</label>
+                <input id="bill-qty" type="number" placeholder="1" />
+              </div>
+              <div id="field-kg" class="field hidden">
+                <label>Weight (kg)</label>
+                <input id="bill-kg" type="number" placeholder="0.0" />
+              </div>
+              <div class="field">
+                <label>Line Total</label>
+                <div id="bill-line-total" class="line-total">₹0.00</div>
+              </div>
+              <div class="field" style="align-self:end">
+                <button id="btn-add-bill-item" class="btn btn-gold" style="height:38px;margin-top:15px">+ Add</button>
+              </div>
+            </div>
+
+            <!-- Bill Items Table -->
+            <div id="bill-items-wrap" class="tbl-wrap hidden">
+              <table class="tbl">
+                <thead>
+                  <tr><th>Item</th><th>Price</th><th>Qty/Kg</th><th>Total</th><th></th></tr>
+                </thead>
+                <tbody id="bill-items-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Payment Details -->
+          <div class="card">
+            <div class="card-title">Payment Details</div>
+            <div class="grid-3col">
+              <div class="field">
+                <label>Transaction Type</label>
+                <select id="bill-tx-type">
+                  <option value="cash">CASH</option>
+                  <option value="upi">UPI</option>
+                  <option value="card">CARD</option>
+                  <option value="credit">CREDIT</option>
+                  <option value="cheque">CHEQUE</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Discount (%)</label>
+                <input id="bill-discount" type="number" value="0" min="0" max="100" />
+              </div>
+              <div class="field">
+                <label>Final Amount (editable)</label>
+                <input id="bill-override-amt" type="number" placeholder="Auto-calculated" />
+              </div>
+            </div>
+            <div class="field">
+              <label>Note (optional)</label>
+              <input id="bill-note" type="text" placeholder="Any note…" />
+            </div>
+          </div>
+
+          <button id="btn-save-bill" class="btn btn-green full-width" style="font-size:15px;padding:13px 24px">
+            💾 Save Bill
+          </button>
+        </div>
+
+        <!-- RIGHT COLUMN -->
+        <div class="flex-col">
+
+          <!-- Summary -->
+          <div class="card">
+            <div class="card-title">Bill Summary</div>
+            <div class="summary-row"><span class="label">Customer</span><span class="value" id="summary-customer">—</span></div>
+            <div class="summary-row"><span class="label">Date</span><span class="value" id="summary-date">—</span></div>
+            <div class="summary-row"><span class="label">Items</span><span class="value" id="summary-items">0</span></div>
+            <hr class="summary-divider" />
+            <div class="summary-row"><span class="label">Subtotal</span><span class="value" id="summary-subtotal">₹0.00</span></div>
+            <div class="summary-row"><span class="label">Discount</span><span class="value value-red" id="summary-discount">-₹0.00 (0%)</span></div>
+            <div class="summary-row"><span class="label">Payment</span><span class="value" id="summary-payment">CASH</span></div>
+            <hr class="summary-divider" />
+            <div class="summary-total"><span>Final Amount</span><span id="summary-final">₹0.00</span></div>
+          </div>
+
+          <!-- Last Saved -->
+          <div id="saved-bill-card" class="card hidden">
+            <div class="card-title">✅ Last Saved Bill</div>
+            <div id="saved-id"     class="saved-id"></div>
+            <div id="saved-name"   class="saved-name"></div>
+            <div id="saved-date"   class="saved-date"></div>
+            <div id="saved-amount" class="saved-amount"></div>
+          </div>
+
+          <!-- Recent Transactions -->
+          <div class="card">
+            <div class="card-title">Recent Transactions</div>
+            <div id="recent-list"><p class="text-muted" style="font-size:13px">No transactions yet</p></div>
+          </div>
+
+        </div>
+      </div>
+    </div><!-- /panel-user -->
+
+
+    <!-- ══════════════════════════════════════════
+         ADMIN PANEL
+    ═══════════════════════════════════════════ -->
+    <div id="panel-admin" class="hidden">
+
+      <!-- Admin Login -->
+      <div id="admin-login-box" class="login-wrap">
+        <div class="login-box">
+          <div class="login-icon">🔐</div>
+          <div class="login-title">Admin Access</div>
+          <div class="login-sub">Enter password to unlock</div>
+          <input id="admin-pw-input" type="password" placeholder="Password" class="login-input" />
+          <div id="admin-pw-error" class="login-error hidden">Incorrect password</div>
+          <button id="btn-admin-login" class="btn btn-gold full-width" style="font-size:15px">Unlock</button>
+          <div class="login-hint">Default: admin123</div>
+        </div>
+      </div>
+
+      <!-- Admin Content -->
+      <div id="admin-content" class="hidden">
+        <div class="flex-between mb-20">
+          <h2 class="section-title">⚙️ Admin Panel</h2>
+          <button id="btn-admin-lock" class="btn hidden" style="background:#2a1a1a;border:1px solid #553333;color:#e05555;font-size:13px">🔒 Lock</button>
+        </div>
+
+        <!-- Tabs -->
+        <div class="flex-row mb-20">
+          <button id="tab-items"    class="btn-tab active">🏷️ Items</button>
+          <button id="tab-activity" class="btn-tab">📊 Activity</button>
+          <button id="tab-dues"     class="btn-tab">💳 Dues</button>
+          <button id="tab-staff"    class="btn-tab">👥 Staff</button>
+          <button id="tab-reports"  class="btn-tab">📄 Reports</button>
+        </div>
+
+        <!-- ── ITEMS SECTION ── -->
+        <div id="admin-section-items">
+          <div class="grid-2">
+            <!-- Add Item Form -->
+            <div class="card">
+              <div class="card-title">Add New Item</div>
+              <div class="field"><label>Item Name</label><input id="new-item-name" type="text" placeholder="e.g. Wheat Flour" /></div>
+              <div class="grid-2col">
+                <div class="field">
+                  <label>Type</label>
+                  <select id="new-item-type">
+                    <option value="fixed">Fixed Price</option>
+                    <option value="kg">Price per Kg</option>
+                  </select>
+                </div>
+                <div class="field"><label>Price (₹)</label><input id="new-item-price" type="number" placeholder="0.00" /></div>
+              </div>
+              <button id="btn-add-item" class="btn btn-gold full-width mt-8">+ Add Item</button>
+            </div>
+            <!-- Items List -->
+            <div class="card">
+              <div class="card-title">Items (<span id="items-count">0</span>)</div>
+              <div id="items-list" class="item-list"><p class="text-muted" style="font-size:13px">No items yet.</p></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── ACTIVITY SECTION ── -->
+        <div id="admin-section-activity" class="hidden">
+          <!-- Controls -->
+          <div class="flex-row mb-18">
+            <select id="activity-view" style="width:auto">
+              <option value="daily">Daily</option>
+              <option value="monthly">Monthly</option>
+            </select>
+            <div id="activity-date-wrap">
+              <input id="activity-date" type="date" style="width:auto" />
+            </div>
+            <div id="activity-month-wrap" class="hidden">
+              <input id="activity-month" type="month" style="width:auto" />
+            </div>
+            <div class="ml-auto text-gold text-bold" style="font-size:17px">
+              Total: <span id="act-total">₹0.00</span>
+            </div>
+          </div>
+          <!-- Stats -->
+          <div class="grid-3 mb-16">
+            <div class="stat-card"><div class="stat-icon">🧾</div><div class="stat-value" id="act-count">0</div><div class="stat-label">Transactions</div></div>
+            <div class="stat-card"><div class="stat-icon">💰</div><div class="stat-value" id="act-revenue">₹0.00</div><div class="stat-label">Revenue</div></div>
+            <div class="stat-card"><div class="stat-icon">📈</div><div class="stat-value" id="act-avg">₹0.00</div><div class="stat-label">Avg. Bill</div></div>
+          </div>
+          <!-- Table -->
+          <div class="card">
+            <div class="card-title">Transaction Log</div>
+            <div style="overflow-x:auto">
+              <table class="tbl">
+                <thead><tr><th>Customer</th><th>Date</th><th>Items</th><th>Payment</th><th>Discount</th><th>Amount</th></tr></thead>
+                <tbody id="activity-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── DUES SECTION ── -->
+        <div id="admin-section-dues" class="hidden">
+          <div class="grid-sidebar">
+            <!-- Add Due -->
+            <div class="card">
+              <div class="card-title">Add Due Entry</div>
+              <div class="field"><label>Name</label><input id="due-name" type="text" placeholder="Customer / Vendor name" /></div>
+              <div class="grid-2col">
+                <div class="field">
+                  <label>Type</label>
+                  <select id="due-type">
+                    <option value="customer">Customer (owes us)</option>
+                    <option value="vendor">Vendor (we owe)</option>
+                  </select>
+                </div>
+                <div class="field"><label>Amount (₹)</label><input id="due-amount" type="number" placeholder="0.00" /></div>
+              </div>
+              <div class="field"><label>Note</label><input id="due-note" type="text" placeholder="Reason…" /></div>
+              <button id="btn-add-due" class="btn btn-gold full-width">+ Add Due</button>
+            </div>
+            <!-- Due Lists -->
+            <div class="flex-col">
+              <!-- Totals -->
+              <div class="grid-2">
+                <div class="stat-card"><div class="stat-icon">👤</div><div class="stat-value" id="dues-cust-total">₹0.00</div><div class="stat-label">Customer Dues (they owe us)</div></div>
+                <div class="stat-card"><div class="stat-icon">🏭</div><div class="stat-value stat-red" id="dues-vend-total">₹0.00</div><div class="stat-label">Vendor Dues (we owe them)</div></div>
+              </div>
+              <!-- Customer Dues -->
+              <div class="card">
+                <div class="card-title">👤 Customer Dues</div>
+                <div id="dues-cust-list"><p class="text-muted" style="font-size:13px">No entries</p></div>
+              </div>
+              <!-- Vendor Dues -->
+              <div class="card">
+                <div class="card-title">🏭 Vendor Dues</div>
+                <div id="dues-vend-list"><p class="text-muted" style="font-size:13px">No entries</p></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── STAFF SECTION ── -->
+        <div id="admin-section-staff" class="hidden">
+          <div class="grid-sidebar">
+            <!-- Add Staff -->
+            <div class="card">
+              <div class="card-title">Add Staff Member</div>
+              <div class="field"><label>Name</label><input id="staff-name" type="text" /></div>
+              <div class="field"><label>Role</label><input id="staff-role" type="text" placeholder="Cashier, Manager…" /></div>
+              <div class="grid-2col">
+                <div class="field"><label>Monthly Salary (₹)</label><input id="staff-salary" type="number" /></div>
+                <div class="field"><label>Paid (₹)</label><input id="staff-paid" type="number" /></div>
+              </div>
+              <div class="field"><label>Month</label><input id="staff-month" type="month" /></div>
+              <button id="btn-add-staff" class="btn btn-gold full-width mt-8">+ Add Staff</button>
+            </div>
+            <!-- Staff Table -->
+            <div id="staff-list" class="card">
+              <div class="card-title">Staff Payments (<span id="staff-count">0</span>)</div>
+              <div style="overflow-x:auto">
+                <table class="tbl">
+                  <thead><tr><th>Name</th><th>Role</th><th>Month</th><th>Salary</th><th>Paid</th><th>Balance</th><th></th></tr></thead>
+                  <tbody id="staff-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── REPORTS SECTION ── -->
+        <div id="admin-section-reports" class="hidden">
+          <div class="card">
+            <div class="card-title">Generate Reports</div>
+
+            <!-- Report type + date controls -->
+            <div class="flex-row mb-18">
+              <button id="rpt-eod"     class="btn-tab active">📅 End of Day</button>
+              <button id="rpt-weekly"  class="btn-tab">📆 Weekly</button>
+              <button id="rpt-monthly" class="btn-tab">🗓️ Monthly</button>
+              <div id="rpt-date-wrap">
+                <input id="rpt-date" type="date" style="width:auto" />
+              </div>
+              <div id="rpt-week-wrap" class="hidden">
+                <input id="rpt-week-date" type="date" style="width:auto" />
+              </div>
+              <div id="rpt-month-wrap" class="hidden">
+                <input id="rpt-month" type="month" style="width:auto" />
+              </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="grid-3 mb-16">
+              <div class="stat-card"><div class="stat-icon">🧾</div><div class="stat-value" id="rpt-count">0</div><div class="stat-label">Transactions</div></div>
+              <div class="stat-card"><div class="stat-icon">💰</div><div class="stat-value" id="rpt-revenue">₹0.00</div><div class="stat-label">Revenue</div></div>
+              <div class="stat-card"><div class="stat-icon">📊</div><div class="stat-value" id="rpt-avg">₹0.00</div><div class="stat-label">Avg Bill</div></div>
+            </div>
+
+            <!-- Preview table -->
+            <div class="report-log">
+              <table class="tbl">
+                <thead><tr><th>Customer</th><th>Date</th><th>Items</th><th>Payment</th><th>Disc</th><th>Amount</th></tr></thead>
+                <tbody id="rpt-tbody">
+                  <tr><td colspan="6" class="report-empty">No transactions in this period</td></tr>
+                </tbody>
+                <tfoot>
+                  <tr class="total-row">
+                    <td colspan="5" class="text-right text-muted" style="padding:9px 13px;font-size:13px">TOTAL</td>
+                    <td class="amount" style="padding:9px 13px;font-size:15px" id="rpt-total">₹0.00</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            <!-- Download -->
+            <div class="flex-row">
+              <button id="btn-dl-txt" class="btn btn-red" style="flex:1;font-size:14px">⬇️ Download Report (TXT)</button>
+              <button id="btn-dl-csv" class="btn btn-green" style="flex:1;font-size:14px">⬇️ Download CSV</button>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /admin-content -->
+    </div><!-- /panel-admin -->
+
+  </div><!-- /app-content -->
+
+</main>
+
+<script src="app.js"></script>
 </body>
-
 </html>
