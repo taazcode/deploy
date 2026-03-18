@@ -35,7 +35,7 @@
 
 * {
     margin: 0;
-    padding: .6vh;
+    padding: 0;
     box-sizing: border-box;
     font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
@@ -285,10 +285,13 @@ button {
 .panel {
     display: none;
     animation: fadeIn 0.4s ease forwards;
+    position: relative; /* Important for absolute overlays */
+    min-height: 400px;
+    width: 100%;
 }
 
 .panel.active {
-    display: block;
+    display: block !important;
 }
 
 /* Password Overlay */

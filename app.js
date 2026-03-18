@@ -6,7 +6,19 @@
 // --- SUPABASE CLIENT ---
 const SUPABASE_URL = 'https://lphokjzfjhejeltkcdqp.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_EKAZajhaXEoTJ-lSImEF0Q_T3YdLYcl';
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// Lazy-init helper to prevent crash if library loads slowly
+let supabase;
+function getSupabase() {
+    if (!supabase) {
+        if (!window.supabase) {
+            console.error('Supabase library not found! Check your internet connection.');
+            return null;
+        }
+        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    }
+    return supabase;
+}
 
 // --- STATE MANAGEMENT ---
 const AppState = {
@@ -37,11 +49,11 @@ const AppState = {
                 staffRes,
                 monthlyRes
             ] = await Promise.all([
-                supabase.from('items').select('*'),
-                supabase.from('bills').select('*').order('created_at', { ascending: false }),
-                supabase.from('dues').select('*'),
-                supabase.from('staff_payments').select('*'),
-                supabase.from('monthly_revenue').select('*').eq('month', new Date().toISOString().slice(0, 7)).maybeSingle()
+                getSupabase().from('items').select('*'),
+                getSupabase().from('bills').select('*').order('created_at', { ascending: false }),
+                getSupabase().from('dues').select('*'),
+                getSupabase().from('staff_payments').select('*'),
+                getSupabase().from('monthly_revenue').select('*').eq('month', new Date().toISOString().slice(0, 7)).maybeSingle()
             ]);
 
             if (itemsRes.error) throw itemsRes.error;
@@ -108,27 +120,23 @@ const AppState = {
 
     // --- Items ---
     async updateItem(id, name, price, type) {
-        price = parseFloat(price);
-        const { error } = await supabase.from('items').update({ name, price, type }).eq('id', id);
-        if (error) { UI.showToast('Error updating item.', 'error'); return false; }
-        const idx = this.items.findIndex(i => i.id === id);
-        if (idx >= 0) { this.items[idx] = { ...this.items[idx], name, price, type }; }
-        return true;
+        const { error } = await getSupabase().from('items').update({ name, price: parseFloat(price), type }).eq('id', id);
+        if (error) { UI.showToast('Error updating item.', 'error'); throw error; }
+        await this.loadData();
     },
 
     async addItem(name, price, type) {
-        price = parseFloat(price);
-        const newItem = { id: 'item_' + Date.now(), name, price, type: type || 'fixed' };
-        const { error } = await supabase.from('items').insert([newItem]);
-        if (error) { UI.showToast('Error saving item.', 'error'); return null; }
-        this.items.push(newItem);
+        const newItem = { name, price: parseFloat(price), type: type || 'fixed' };
+        const { error } = await getSupabase().from('items').insert([newItem]);
+        if (error) { UI.showToast('Error saving item.', 'error'); throw error; }
+        await this.loadData();
         return newItem;
     },
 
     async deleteItem(itemId) {
-        const { error } = await supabase.from('items').delete().eq('id', itemId);
-        if (error) { UI.showToast('Error deleting item.', 'error'); return; }
-        this.items = this.items.filter(i => i.id !== itemId);
+        const { error } = await getSupabase().from('items').delete().eq('id', itemId);
+        if (error) { UI.showToast('Error deleting item.', 'error'); throw error; }
+        await this.loadData();
     },
 
     // --- Bill (current in-progress) ---
@@ -190,7 +198,7 @@ const AppState = {
             transaction_type: bill.transactionType
         };
 
-        const { error } = await supabase.from('bills').insert([dbBill]);
+        const { error } = await getSupabase().from('bills').insert([dbBill]);
         if (error) { UI.showToast('Error saving bill.', 'error'); return false; }
 
         this.dailyBills.push(bill);
@@ -208,7 +216,7 @@ const AppState = {
     // --- Monthly Revenue ---
     async addToMonthlyRevenue(amount) {
         this.monthlyRevenue.total += amount;
-        const { error } = await supabase.from('monthly_revenue').upsert({
+        const { error } = await getSupabase().from('monthly_revenue').upsert({
             month: this.monthlyRevenue.month,
             total: this.monthlyRevenue.total
         }, { onConflict: 'month' });
@@ -217,123 +225,121 @@ const AppState = {
 
     // --- Dues ---
     async addDue(name, amount, date, type) {
-        const newDue = { id: 'due_' + Date.now(), name, amount: parseFloat(amount), date, type };
-        const { error } = await supabase.from('dues').insert([newDue]);
-        if (error) { UI.showToast('Error saving due.', 'error'); return null; }
-        this.dues.push(newDue);
-        return newDue;
+        const newDue = { name, amount: parseFloat(amount), date, type };
+        const { error } = await getSupabase().from('dues').insert([newDue]);
+        if (error) { UI.showToast('Error saving due.', 'error'); throw error; }
+        await this.loadData();
     },
 
     async updateDue(id, name, amount, date, type) {
-        const { error } = await supabase.from('dues').update({ name, amount: parseFloat(amount), date, type }).eq('id', id);
-        if (error) { UI.showToast('Error updating due.', 'error'); return false; }
-        const idx = this.dues.findIndex(d => d.id === id);
-        if (idx >= 0) this.dues[idx] = { ...this.dues[idx], name, amount: parseFloat(amount), date, type };
-        return true;
+        const { error } = await getSupabase().from('dues').update({ name, amount: parseFloat(amount), date, type }).eq('id', id);
+        if (error) { UI.showToast('Error updating due.', 'error'); throw error; }
+        await this.loadData();
     },
 
     async settleDue(dueId) {
-        const { error } = await supabase.from('dues').delete().eq('id', dueId);
-        if (error) { UI.showToast('Error settling due.', 'error'); return; }
-        this.dues = this.dues.filter(d => d.id !== dueId);
+        const { error } = await getSupabase().from('dues').delete().eq('id', dueId);
+        if (error) { UI.showToast('Error settling due.', 'error'); throw error; }
+        await this.loadData();
     },
 
     // --- Staff Payments ---
     async addStaffPayment(name, type, amount, date) {
-        const newPayment = { id: 'staff_' + Date.now(), name, type, amount: parseFloat(amount), date };
-        const { error } = await supabase.from('staff_payments').insert([newPayment]);
-        if (error) { UI.showToast('Error saving staff payment.', 'error'); return null; }
-        this.staffPayments.push(newPayment);
-        return newPayment;
+        const newPayment = { name, type, amount: parseFloat(amount), date };
+        const { error } = await getSupabase().from('staff_payments').insert([newPayment]);
+        if (error) { UI.showToast('Error saving staff payment.', 'error'); throw error; }
+        await this.loadData();
     },
 
     async updateStaffPayment(id, name, type, amount, date) {
-        const { error } = await supabase.from('staff_payments').update({ name, type, amount: parseFloat(amount), date }).eq('id', id);
-        if (error) { UI.showToast('Error updating staff payment.', 'error'); return false; }
-        const idx = this.staffPayments.findIndex(s => s.id === id);
-        if (idx >= 0) this.staffPayments[idx] = { ...this.staffPayments[idx], name, type, amount: parseFloat(amount), date };
-        return true;
+        const { error } = await getSupabase().from('staff_payments').update({ name, type, amount: parseFloat(amount), date }).eq('id', id);
+        if (error) { UI.showToast('Error updating staff payment.', 'error'); throw error; }
+        await this.loadData();
     },
 
     async deleteStaffPayment(id) {
-        const { error } = await supabase.from('staff_payments').delete().eq('id', id);
-        if (error) { UI.showToast('Error deleting staff payment.', 'error'); return; }
-        this.staffPayments = this.staffPayments.filter(s => s.id !== id);
+        const { error } = await getSupabase().from('staff_payments').delete().eq('id', id);
+        if (error) { UI.showToast('Error deleting staff payment.', 'error'); throw error; }
+        await this.loadData();
     }
 };
 
 // --- DOM & UI MANAGEMENT ---
 const UI = {
-    elements: {
-        // Nav
-        navUser: document.getElementById('navUser'),
-        navAdmin: document.getElementById('navAdmin'),
-        generatePdfBtn: document.getElementById('generatePdfBtn'),
-        generateWeeklyBtn: document.getElementById('generateWeeklyBtn'),
-        generateMonthlyBtn: document.getElementById('generateMonthlyBtn'),
-        
-        // Panels
-        userPanel: document.getElementById('userPanel'),
-        adminPanel: document.getElementById('adminPanel'),
-        
-        // Admin
-        adminPasswordScreen: document.getElementById('adminPasswordScreen'),
-        adminContentWrapper: document.getElementById('adminContentWrapper'),
-        adminPasswordInput: document.getElementById('adminPasswordInput'),
-        adminLoginBtn: document.getElementById('adminLoginBtn'),
-        adminItemForm: document.getElementById('adminItemForm'),
-        adminItemName: document.getElementById('adminItemName'),
-        adminItemDataList: document.getElementById('adminItemDataList'),
-        adminItemPrice: document.getElementById('adminItemPrice'),
-        adminItemType: document.getElementById('adminItemType'),
-        adminSaveBtn: document.getElementById('adminSaveBtn'),
-        adminCancelEditBtn: document.getElementById('adminCancelEditBtn'),
-        adminDeleteBtn: document.getElementById('adminDeleteBtn'),
-        adminDueForm: document.getElementById('adminDueForm'),
-        dueName: document.getElementById('dueName'),
-        dueType: document.getElementById('dueType'),
-        dueAmount: document.getElementById('dueAmount'),
-        dueDate: document.getElementById('dueDate'),
-        saveDueBtn: document.getElementById('saveDueBtn'),
-        cancelDueEditBtn: document.getElementById('cancelDueEditBtn'),
-        adminDuesBody: document.getElementById('adminDuesBody'),
-
-        // Staff Panel
-        adminStaffForm: document.getElementById('adminStaffForm'),
-        staffName: document.getElementById('staffName'),
-        staffPaymentType: document.getElementById('staffPaymentType'),
-        staffAmount: document.getElementById('staffAmount'),
-        staffDate: document.getElementById('staffDate'),
-        saveStaffBtn: document.getElementById('saveStaffBtn'),
-        cancelStaffEditBtn: document.getElementById('cancelStaffEditBtn'),
-        adminStaffBody: document.getElementById('adminStaffBody'),
-
-        clearDataBtn: document.getElementById('clearDataBtn'),
-        
-        // User (Billing)
-        customerName: document.getElementById('customerName'),
-        billDate: document.getElementById('billDate'),
-        itemInput: document.getElementById('itemInput'),
-        itemList: document.getElementById('itemList'),
-        itemQty: document.getElementById('itemQty'),
-        itemWeight: document.getElementById('itemWeight'),
-        addItemBtn: document.getElementById('addItemBtn'),
-        billItemsBody: document.getElementById('billItemsBody'),
-        subTotal: document.getElementById('subTotal'),
-        billDiscount: document.getElementById('billDiscount'),
-        transactionType: document.getElementById('transactionType'),
-        grandTotal: document.getElementById('grandTotal'),
-        clearBillBtn: document.getElementById('clearBillBtn'),
-        saveBillBtn: document.getElementById('saveBillBtn'),
-        recentBillsList: document.getElementById('recentBillsList'),
-        dailyRevenueTotal: document.getElementById('dailyRevenueTotal'),
-        monthlyRevenueTotal: document.getElementById('monthlyRevenueTotal'),
-
-        // Toasts
-        toastContainer: document.getElementById('toastContainer')
-    },
+    elements: {},
 
     init() {
+        // 1. Map all elements
+        this.elements = {
+            // Nav
+            navUser: document.getElementById('navUser'),
+            navAdmin: document.getElementById('navAdmin'),
+            generatePdfBtn: document.getElementById('generatePdfBtn'),
+            generateWeeklyBtn: document.getElementById('generateWeeklyBtn'),
+            generateMonthlyBtn: document.getElementById('generateMonthlyBtn'),
+            
+            // Panels
+            userPanel: document.getElementById('userPanel'),
+            adminPanel: document.getElementById('adminPanel'),
+            
+            // Admin
+            adminPasswordScreen: document.getElementById('adminPasswordScreen'),
+            adminContentWrapper: document.getElementById('adminContentWrapper'),
+            adminPasswordInput: document.getElementById('adminPasswordInput'),
+            adminLoginBtn: document.getElementById('adminLoginBtn'),
+            adminItemForm: document.getElementById('adminItemForm'),
+            adminItemName: document.getElementById('adminItemName'),
+            adminItemDataList: document.getElementById('adminItemDataList'),
+            adminItemPrice: document.getElementById('adminItemPrice'),
+            adminItemType: document.getElementById('adminItemType'),
+            adminSaveBtn: document.getElementById('adminSaveBtn'),
+            adminCancelEditBtn: document.getElementById('adminCancelEditBtn'),
+            adminDeleteBtn: document.getElementById('adminDeleteBtn'),
+            adminDueForm: document.getElementById('adminDueForm'),
+            dueName: document.getElementById('dueName'),
+            dueType: document.getElementById('dueType'),
+            dueAmount: document.getElementById('dueAmount'),
+            dueDate: document.getElementById('dueDate'),
+            saveDueBtn: document.getElementById('saveDueBtn'),
+            cancelDueEditBtn: document.getElementById('cancelDueEditBtn'),
+            adminDuesBody: document.getElementById('adminDuesBody'),
+
+            // Staff Panel
+            adminStaffForm: document.getElementById('adminStaffForm'),
+            staffName: document.getElementById('staffName'),
+            staffPaymentType: document.getElementById('staffPaymentType'),
+            staffAmount: document.getElementById('staffAmount'),
+            staffDate: document.getElementById('staffDate'),
+            saveStaffBtn: document.getElementById('saveStaffBtn'),
+            cancelStaffEditBtn: document.getElementById('cancelStaffEditBtn'),
+            adminStaffBody: document.getElementById('adminStaffBody'),
+
+            clearDataBtn: document.getElementById('clearDataBtn'),
+            
+            // User (Billing)
+            customerName: document.getElementById('customerName'),
+            billDate: document.getElementById('billDate'),
+            itemInput: document.getElementById('itemInput'),
+            itemList: document.getElementById('itemList'),
+            itemQty: document.getElementById('itemQty'),
+            itemWeight: document.getElementById('itemWeight'),
+            addItemBtn: document.getElementById('addItemBtn'),
+            billItemsBody: document.getElementById('billItemsBody'),
+            subTotal: document.getElementById('subTotal'),
+            billDiscount: document.getElementById('billDiscount'),
+            transactionType: document.getElementById('transactionType'),
+            grandTotal: document.getElementById('grandTotal'),
+            clearBillBtn: document.getElementById('clearBillBtn'),
+            saveBillBtn: document.getElementById('saveBillBtn'),
+            recentBillsList: document.getElementById('recentBillsList'),
+            dailyRevenueTotal: document.getElementById('dailyRevenueTotal'),
+            monthlyRevenueTotal: document.getElementById('monthlyRevenueTotal'),
+
+            // Toasts
+            toastContainer: document.getElementById('toastContainer')
+        };
+
+        // 2. Initialize Logic
         this.bindEvents();
         this.populateItemSearch();
         this.updateItemList();
@@ -345,6 +351,7 @@ const UI = {
         const today = new Date().toISOString().split('T')[0];
         if (this.elements.dueDate) this.elements.dueDate.value = today;
         if (this.elements.staffDate) this.elements.staffDate.value = today;
+        if (this.elements.billDate) this.elements.billDate.value = today;
     },
 
     bindEvents() {
@@ -433,25 +440,34 @@ const UI = {
     },
 
     switchTab(tab) {
+        console.log('Switching to tab:', tab);
+        
+        const navUser = this.elements.navUser;
+        const navAdmin = this.elements.navAdmin;
+        const userPanel = this.elements.userPanel;
+        const adminPanel = this.elements.adminPanel;
+
+        if (!navUser || !navAdmin || !userPanel || !adminPanel) {
+            console.error('Critical UI elements missing for tab switch');
+            return;
+        }
+
         if (tab === 'user') {
-            this.elements.navUser.classList.add('active');
-            this.elements.navAdmin.classList.remove('active');
-            this.elements.userPanel.classList.remove('hidden');
-            this.elements.userPanel.classList.add('active');
-            this.elements.adminPanel.classList.add('hidden');
-            this.elements.adminPanel.classList.remove('active');
-            
-            // Refresh select when switching to user panel
+            navUser.classList.add('active');
+            navAdmin.classList.remove('active');
+            userPanel.classList.remove('hidden');
+            userPanel.classList.add('active');
+            adminPanel.classList.add('hidden');
+            adminPanel.classList.remove('active');
             this.updateItemList();
         } else {
-            this.elements.navAdmin.classList.add('active');
-            this.elements.navUser.classList.remove('active');
-            this.elements.adminPanel.classList.remove('hidden');
-            this.elements.adminPanel.classList.add('active');
-            this.elements.userPanel.classList.add('hidden');
-            this.elements.userPanel.classList.remove('active');
+            navAdmin.classList.add('active');
+            navUser.classList.remove('active');
+            adminPanel.classList.remove('hidden');
+            adminPanel.classList.add('active');
+            userPanel.classList.add('hidden');
+            userPanel.classList.remove('active');
             
-            // Password checked internally by CSS and handleAdminLogin
             if(!this.isAdminUnlocked) {
                 this.elements.adminPasswordInput.focus();
             } else {
@@ -1250,12 +1266,22 @@ function generateMonthlyReport() {
 
 // Bootstrap Application
 document.addEventListener('DOMContentLoaded', () => {
-    // 1. Initialize UI Elements and Event Listeners Immediately
-    UI.init();
-    
-    // 2. Start Data Loading in Background (don't block the UI)
-    AppState.init().catch(err => {
-        console.error('Critical initialization error:', err);
-        UI.showToast('Bootstrap error. Check internet connection.', 'error');
-    });
+    try {
+        console.log('DOM Content Loaded. Initializing UI...');
+        // 1. Initialize UI Elements and Event Listeners Immediately
+        UI.init();
+        
+        // 2. Start Data Loading in Background (don't block the UI)
+        if (getSupabase()) {
+            AppState.init().catch(err => {
+                console.error('AppState init failed:', err);
+                UI.showToast('Database connection failed. Check internet.', 'error');
+            });
+        } else {
+            UI.showToast('Database library error. Please refresh.', 'error');
+        }
+    } catch (err) {
+        console.error('CRITICAL UI BOOTSTRAP FAILURE:', err);
+        alert('Application failed to start. Please check browser console for details.');
+    }
 });
